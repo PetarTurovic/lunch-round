@@ -1,0 +1,27 @@
+{
+  "name": "lunchround-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LunchRound API. Blueprint: MongoDB schemas and project skeleton.",
+  "type": "commonjs",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "migrate": "tsx scripts/migrate-data.ts"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.5",
+    "mongoose": "^9.10.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "license": "ISC"
+}
