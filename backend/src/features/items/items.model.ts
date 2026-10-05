@@ -1,4 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
+import type { PaginateModel } from 'mongoose';
+import paginate from 'mongoose-paginate-v2';
 import { IItem } from './items.types';
 
 export interface ItemDocument extends Omit<IItem, '_id'> {
@@ -67,23 +69,27 @@ export const ItemSchema = new Schema<ItemDocument>(
       default: false,
     },
     optionGroups: {
-      type: [{
-        name: String,
-        min: Number,
-        max: Number,
-        multiple: Boolean,
-        required: Boolean,
-        options: [{
+      type: [
+        {
           name: String,
-          priceImpact: Number,
-          selectedByDefault: Boolean,
-          priceInfo: {
-            amount: Number,
-            currencyCode: String,
-            displayText: String,
-          },
-        }],
-      }],
+          min: Number,
+          max: Number,
+          multiple: Boolean,
+          required: Boolean,
+          options: [
+            {
+              name: String,
+              priceImpact: Number,
+              selectedByDefault: Boolean,
+              priceInfo: {
+                amount: Number,
+                currencyCode: String,
+                displayText: String,
+              },
+            },
+          ],
+        },
+      ],
     },
     imageUrl: {
       type: String,
@@ -124,5 +130,7 @@ export const ItemSchema = new Schema<ItemDocument>(
 ItemSchema.index({ storeId: 1, sectionTitle: 1 });
 ItemSchema.index({ storeId: 1, itemKey: 1 }, { unique: true });
 ItemSchema.index({ itemUuid: 1 });
-export const Item =
-  mongoose.models.Item ?? mongoose.model<ItemDocument>('Item', ItemSchema);
+ItemSchema.plugin(paginate);
+export const Item = (
+  mongoose.models.Item ?? mongoose.model('Item', ItemSchema)
+) as unknown as PaginateModel<ItemDocument>;

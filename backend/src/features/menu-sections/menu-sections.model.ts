@@ -1,4 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
+import type { PaginateModel } from 'mongoose';
+import paginate from 'mongoose-paginate-v2';
 import { IMenuSection } from './menu-sections.types';
 
 export interface MenuSectionDocument extends Omit<IMenuSection, '_id'> {
@@ -31,5 +33,8 @@ export const MenuSectionSchema = new Schema<MenuSectionDocument>(
 );
 MenuSectionSchema.index({ storeId: 1, title: 1 }, { unique: true });
 MenuSectionSchema.index({ storeId: 1 });
-export const MenuSection =
-  mongoose.models.MenuSection ?? mongoose.model<MenuSectionDocument>('MenuSection', MenuSectionSchema);
+MenuSectionSchema.plugin(paginate);
+export const MenuSection = (
+  mongoose.models.MenuSection ??
+  mongoose.model('MenuSection', MenuSectionSchema)
+) as unknown as PaginateModel<MenuSectionDocument>;

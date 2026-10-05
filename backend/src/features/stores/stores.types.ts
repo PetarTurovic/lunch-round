@@ -1,3 +1,5 @@
+import type { IItem } from '../items/items.types';
+
 export interface GeoPoint {
   type: 'Point';
   coordinates: [number, number];
@@ -31,9 +33,6 @@ export interface IStore {
   createdAt: Date;
   updatedAt: Date;
 }
-export type CreateStoreInput = Omit<IStore, '_id' | 'createdAt' | 'updatedAt'>;
-
-export type UpdateStoreInput = Partial<Omit<CreateStoreInput, '_id'>>;
 export interface StoreFilters {
   platform?: string;
   city?: string;
@@ -45,10 +44,6 @@ export interface StoreFilters {
   lat?: number;
   lon?: number;
   radius?: number;
-  page?: number;
-  limit?: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
 }
 export type StoreFiltersInput = StoreFilters;
 export interface StoreListResponse {
@@ -60,5 +55,15 @@ export interface StoreListResponse {
     totalPages: number;
   };
 }
-export type Platform = 'glovo' | 'ubereats' | string;
-export type Category = 'RESTAURANT' | 'GROCERY' | 'MARKET' | string;
+export interface MenuSectionWithItems {
+  _id: string;
+  storeId: string;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  items: IItem[];
+}
+export interface StoreMenuResponse {
+  store: IStore;
+  sections: MenuSectionWithItems[];
+}

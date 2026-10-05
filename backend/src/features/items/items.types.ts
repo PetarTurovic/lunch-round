@@ -40,8 +40,6 @@ export interface IItem {
   firstSeenAt: Date;
   lastSeenAt: Date;
 }
-export type CreateItemInput = Omit<IItem, '_id' | 'createdAt' | 'firstSeenAt' | 'lastSeenAt' | 'itemHash' | 'revision'>;
-export type UpdateItemInput = Partial<Omit<CreateItemInput, '_id' | 'storeId'>>;
 export interface ItemFilters {
   storeId?: string;
   sectionTitle?: string;
@@ -52,10 +50,6 @@ export interface ItemFilters {
   currency?: string;
   isSoldOut?: boolean;
   hasOptions?: boolean;
-  page?: number;
-  limit?: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
 }
 export type ItemFiltersInput = ItemFilters;
 export interface ItemListResponse {
@@ -66,9 +60,4 @@ export interface ItemListResponse {
     total: number;
     totalPages: number;
   };
-}
-export interface PriceRange {
-  min: number;
-  max: number;
-  currency: string;
 }

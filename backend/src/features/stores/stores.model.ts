@@ -1,4 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
+import type { PaginateModel } from 'mongoose';
+import paginate from 'mongoose-paginate-v2';
 import { IStore } from './stores.types';
 
 export interface StoreDocument extends Omit<IStore, '_id'> {
@@ -113,5 +115,7 @@ StoreSchema.index({ geo: '2dsphere' });
 StoreSchema.index({ platform: 1, city: 1 });
 StoreSchema.index({ country: 1, city: 1 });
 StoreSchema.index({ isActive: 1, platform: 1 });
-export const Store =
-  mongoose.models.Store ?? mongoose.model<StoreDocument>('Store', StoreSchema);
+StoreSchema.plugin(paginate);
+export const Store = (
+  mongoose.models.Store ?? mongoose.model('Store', StoreSchema)
+) as unknown as PaginateModel<StoreDocument>;

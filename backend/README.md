@@ -1,8 +1,7 @@
 # LunchRound — Backend
 
-Node + TypeScript + Mongoose. This package is a **blueprint**: the MongoDB
-schemas and the project skeleton are in place, and there is no application code
-yet. No HTTP layer, no routes, no services, no tests.
+Node + TypeScript + [Express 5](https://expressjs.com/) + Mongoose. Serves the
+menu data harvested into the `lunchround` MongoDB database.
 
 ## Structure
 
@@ -11,69 +10,72 @@ backend/
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
+├── scripts/
+│   └── migrate-data.ts    # one-off copy from the source `menue` database
 └── src/
-    ├── server.ts        # connects, then exits — the HTTP layer goes here
+    ├── server.ts          # boot: connect, then listen
+    ├── app.ts             # createApp(): middleware, routes, error handling
     ├── config/
-    │   └── index.ts     # env config
+    │   └── index.ts       # env config
     ├── shared/
-    │   └── db/
-    │       ├── connection.ts   # connectDatabase()
-    │       └── index.ts
+    │   ├── db/connection.ts
+    │   ├── errors.ts      # AppError, NotFoundError
+    │   ├── middleware.ts  # cors, notFound, errorHandler
+    │   ├── pagination.ts  # query param parsing helpers
+    │   └── health.routes.ts
     └── features/
-        ├── stores/
-        │   ├── stores.model.ts     # schema + indexes
-        │   └── stores.types.ts
+        ├── stores/        # .controller.ts + .routes.ts + .model.ts + .types.ts
         ├── items/
-        │   ├── items.model.ts
-        │   └── items.types.ts
         └── menu-sections/
-            ├── menu-sections.model.ts
-            └── menu-sections.types.ts
 ```
 
-## Schemas
+Each feature folder follows the same layout: `*.routes.ts` wires the router,
+`*.controller.ts` holds the handlers, `*.model.ts` the Mongoose schema and
+indexes, and `*.types.ts` the document/response shapes.
 
-Three collections, each in its own feature folder with a `.model.ts` (schema,
-indexes, registered model) and a `.types.ts` (document shape).
+## Express 5 notes
 
-| Model | Collection | Notes |
+- Route handlers are plain `async` functions. Express 5 forwards rejected
+  promises to the error middleware natively, so there is no `asyncHandler`
+  wrapper — controllers `throw new NotFoundError(...)` directly.
+- The error handler in [src/shared/middleware.ts](src/shared/middleware.ts)
+  maps `AppError` instances to their status code, Mongoose `ValidationError`
+  to 400, and everything else to 500.
+
+## API
+
+All routes are mounted under `/` (the dev server proxies `/api` from the
+frontend config where applicable):
+
+| Method | Path | Description |
 | --- | --- | --- |
-| `Store` | `stores` | composite `_id` of `platform:storeId`, 2dsphere `geo` index |
-| `Item` | `items` | composite `_id` of `storeId:itemKey`, nested option groups |
-| `MenuSection` | `menu_sections` | composite `_id` of `storeId:sectionTitle` |
+| GET | `/health` | Liveness probe |
+| GET | `/stores` | List stores; filters `platform`, `city`, `country`, `category`, `search`, `isActive`, `minRating`, `lat`/`lon`/`radius` |
+| GET | `/stores/:idOrSlug` | Single store by `_id` or `slug` |
+| GET | `/stores/:idOrSlug/menu` | Store with sections and their items |
+| GET | `/menu-sections` | List sections; filter `storeId` |
+| GET | `/menu-sections/:id` | Single section |
+| GET | `/items` | List items; filters `storeId`, `sectionTitle`, `sections`, `search`, `minPrice`/`maxPrice`, `currency`, `isSoldOut`, `hasOptions` |
+| GET | `/items/:id` | Single item |
 
-Collection names are set explicitly in each schema's options. Mongoose
-pluralizes model names, so `MenuSection` would otherwise resolve to
-`menusections` — a different, empty collection from the real `menu_sections`.
-
-## Database connection
-
-One function, called once at startup:
-
-```ts
-await mongoose.connect(config.mongodbUri);
-```
-
-That is the whole thing. As a monolith there is a single connection for the
-process, so there is no pool to configure, no cached connection promise, and no
-stale-connection state to check. If you later need a second connection for a
-migration or a replica set, add it then.
+List endpoints accept `page`, `limit` (capped at 100), `sortBy` (allowlisted
+per resource) and `sortOrder=asc|desc`.
 
 ## Commands
 
 ```bash
 npm install
-npm run dev           # tsx watch, connects and exits
+npm run dev           # tsx watch
 npm run build         # tsc
 npm run type-check    # tsc --noEmit
 npm run format        # prettier
+npm run migrate       # copy data from the source database
 ```
 
 From the repo root, `npm run dev` runs this alongside the frontend.
 
-## Not here yet
+## Environment
 
-No HTTP server, so `express` is not a dependency. Add it — plus whatever
-validation and error handling you want — when you build the first route. The
-`dev` script currently connects and exits, which is all a schema-only package
-can meaningfully do.
+See [.env.example](.env.example). `MONGODB_URI` is the target database; the
+migration script additionally reads `MONGODB_SOURCE_URI` (the old `menue`
+database) directly from the environment.

@@ -1,16 +1,21 @@
-import mongoose from 'mongoose';
-import { connectDatabase } from '@/shared/db';
+import { createApp } from '@/app';
+import { connectDatabase } from '@/shared/db/connection';
+import config from '@/config';
 
-async function main(): Promise<void> {
-  await connectDatabase();
-  console.log('Connected to MongoDB');
-}
+const startServer = async () => {
+  const app = createApp();
 
-main().catch((error: unknown) => {
-  console.error('Failed to start:', error);
-  process.exit(1);
-});
+  try {
+    await connectDatabase();
+  } catch (error) {
+    console.error('Failed to connect to the database:', error);
+    process.exit(1);
+  }
 
-process.on('SIGINT', () => {
-  void mongoose.disconnect().then(() => process.exit(0));
-});
+  app.listen(config.port, () => {
+    console.log(`Server running in ${config.nodeEnv} mode on port ${config.port}`);
+    console.log(`API base URL: http://localhost:${config.port}/api`);
+  });
+};
+
+startServer();
