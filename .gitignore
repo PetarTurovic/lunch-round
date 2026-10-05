@@ -32,3 +32,11 @@ npm-debug.log*
 
 # Scripts (run them locally, don't commit)
 scripts/
+
+# Local database backups
+.backups/
+
+# Dependency docs directories under node_modules only. A bare `docs/` also
+# swallows backend/docs, and git cannot re-include a path whose parent
+# directory is excluded.
+**/node_modules/**/docs/

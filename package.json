@@ -9,7 +9,6 @@
     "dev:web": "npm run dev --prefix frontend",
     "build": "npm run build --prefix backend && npm run build --prefix frontend",
     "type-check": "npm run type-check --prefix backend && npm run type-check --prefix frontend",
-    "migrate": "npm run migrate --prefix backend",
     "setup": "npm install && npm run install:packages",
     "install:packages": "npm install --prefix backend && npm install --prefix frontend"
   },

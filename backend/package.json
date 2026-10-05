@@ -11,14 +11,16 @@
     "start": "node dist/server.js",
     "type-check": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
-    "migrate": "tsx scripts/migrate-data.ts"
+    "verify:settlement": "tsx scripts/verify-settlement.ts",
+    "smoke:orders": "tsx scripts/smoke-order-domain.ts"
   },
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
     "mongoose": "^9.10.4",
-    "mongoose-paginate-v2": "^1.9.5"
+    "mongoose-paginate-v2": "^1.9.5",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
