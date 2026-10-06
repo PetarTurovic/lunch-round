@@ -1,6 +1,5 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { AppError } from '../../shared/errors';
 import {
   getStoresService,
   getStoreByIdOrSlugService,
@@ -25,60 +24,30 @@ const storeListQuery = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
-const menuSummaryQuery = z.object({
-  items: z.coerce.number().int().min(1).max(10).optional(),
-});
-
-const idOrSlug = z.string().min(1);
-
-const parse = <T extends z.ZodType>(schema: T, data: unknown): z.infer<T> => {
-  const result = schema.safeParse(data);
-  if (!result.success) {
-    const message = result.error.issues
-      .map((issue) => `${issue.path.join('.') || 'query'}: ${issue.message}`)
-      .join('; ');
-    throw new AppError(message, 400);
-  }
-  return result.data;
-};
-
-const blankToUndefined = (data: unknown): unknown =>
-  typeof data === 'object' && data !== null
-    ? Object.fromEntries(Object.entries(data).filter(([, value]) => value !== ''))
-    : data;
-
-const pathParam = (value: unknown): string => parse(idOrSlug, Array.isArray(value) ? value[0] : value);
-
 export const getStoresController = async (req: Request, res: Response) => {
-  const { radius, ...filters } = parse(storeListQuery, blankToUndefined(req.query));
+  const { radius, ...filters } = storeListQuery.parse(req.query);
   const result = await getStoresService({ ...filters, radiusKm: radius });
   res.json(result);
 };
 
 export const getStoreController = async (req: Request, res: Response) => {
-  const store = await getStoreByIdOrSlugService(pathParam(req.params.idOrSlug));
+  const idOrSlug = z.string().parse(req.params.idOrSlug);
+  const store = await getStoreByIdOrSlugService(idOrSlug);
   res.json({ store });
 };
 
 export const getStoreMenuController = async (req: Request, res: Response) => {
-  const store = await getStoreByIdOrSlugService(pathParam(req.params.idOrSlug));
-  res.json({
-    store: {
-      _id: store._id,
-      slug: store.slug,
-      name: store.name,
-      platform: store.platform,
-      currency: store.currency,
-      location: store.location,
-      delivery: store.delivery,
-      stats: store.stats,
-      menu: store.menu,
-    },
-  });
+  const idOrSlug = z.string().parse(req.params.idOrSlug);
+  const store = await getStoreByIdOrSlugService(idOrSlug);
+  
+  const { _id, slug, name, platform, currency, location, delivery, stats, menu } = store;
+  res.json({ store: { _id, slug, name, platform, currency, location, delivery, stats, menu } });
 };
 
 export const getStoreMenuSummaryController = async (req: Request, res: Response) => {
-  const { items } = parse(menuSummaryQuery, blankToUndefined(req.query));
-  const store = await getStoreMenuSummaryService(pathParam(req.params.idOrSlug), items ?? 3);
+  const items = z.coerce.number().int().min(1).max(10).default(3).parse(req.query.items);
+  const idOrSlug = z.string().parse(req.params.idOrSlug);
+  const store = await getStoreMenuSummaryService(idOrSlug, items);
+  
   res.json({ store });
 };
