@@ -1,24 +1,13 @@
 import mongoose, { Schema, type Types } from "mongoose";
+import type { EmbeddedOrderItem } from "../rounds/rounds.model";
 
 export const SELECTION_STATUSES = ["active", "removed"] as const;
 export type SelectionStatus = (typeof SELECTION_STATUSES)[number];
 
-export interface SelectionDocument {
-  _id: Types.ObjectId;
+export interface SelectionDocument extends EmbeddedOrderItem {
   orderId: Types.ObjectId;
-  participantId: Types.ObjectId;
   roundId: Types.ObjectId;
   storeId: string;
-  itemId: string;
-  sectionKey?: string | null;
-  itemSnapshot: { name: string; imageUrl?: string | null };
-  quantity: number;
-  menuUnitPriceCents: number;
-  unitPriceCents: number;
-  priceOverridden: boolean;
-  note?: string | null;
-  status: SelectionStatus;
-  createdAt: Date;
   updatedAt: Date;
 }
 

@@ -2,11 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { Types } from "mongoose";
 import { Round, type EmbeddedParticipant } from "../rounds/rounds.model";
 
-export const hashToken = (token: string): string =>
-  createHash("sha256").update(token).digest("hex");
-
-export const generateToken = (): string =>
-  randomBytes(24).toString("hex");
+export const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
+export const generateToken = (): string => randomBytes(24).toString("hex");
 
 export const joinRoundService = async (
   roundId: Types.ObjectId,
@@ -25,15 +22,9 @@ export const joinRoundService = async (
   return { participant, token };
 };
 
-export const resolveParticipantService = async (
-  roundId: Types.ObjectId,
-  token: string,
-): Promise<EmbeddedParticipant | null> => {
+export const resolveParticipantService = async (roundId: Types.ObjectId, token: string): Promise<EmbeddedParticipant | null> => {
   if (!token) return null;
-  const round = await Round.findOne(
-    { _id: roundId, "participants.tokenHash": hashToken(token) },
-    { "participants.$": 1 },
-  ).lean();
+  const round = await Round.findOne({ _id: roundId, "participants.tokenHash": hashToken(token) }, { "participants.$": 1 }).lean();
   return round?.participants?.[0] ?? null;
 };
 

@@ -44,39 +44,7 @@ export const StoreSchema = new Schema(
       minOrder: { amount: Number, currency: String },
       timeMinutes: { min: Number, max: Number, text: String },
     },
-    menu: {
-      sections: [
-        {
-          key: String,
-          title: String,
-          position: Number,
-          items: [
-            {
-              _id: String,
-              externalId: String,
-              name: String,
-              searchName: String,
-              description: String,
-              price: Number,
-              imageUrl: String,
-              available: Boolean,
-              alsoInSections: [String],
-              optionGroups: [
-                {
-                  key: String,
-                  name: String,
-                  minSelect: Number,
-                  maxSelect: Number,
-                  multiple: Boolean,
-                  required: Boolean,
-                  options: [{ key: String, name: String, priceDelta: Number, selectedByDefault: Boolean }],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
+    menu: { type: Schema.Types.Mixed, default: { sections: [] } },
     stats: { itemCount: Number, sectionCount: Number, hasImages: Boolean, priceRange: { min: Number, max: Number } },
     source: { url: String, platformSpecific: Schema.Types.Mixed },
   },

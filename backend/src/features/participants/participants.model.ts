@@ -1,14 +1,9 @@
 import mongoose, { Schema, type Types } from "mongoose";
+import type { EmbeddedParticipant } from "../rounds/rounds.model";
 
-export interface ParticipantDocument {
-  _id: Types.ObjectId;
+export interface ParticipantDocument extends EmbeddedParticipant {
   roundId: Types.ObjectId;
-  userId: Types.ObjectId | null;
-  name: string;
   email?: string | null;
-  tokenHash: string;
-  claimedAt?: Date | null;
-  joinedAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -1,48 +1,25 @@
 import mongoose, { Schema, type Types } from "mongoose";
+import {
+  ORDER_STATUSES,
+  type OrderStatus,
+  type AdjustmentType,
+  type AdjustmentAllocation,
+  type EmbeddedAdjustment,
+  type EmbeddedPayment,
+  type EmbeddedOrder,
+} from "../rounds/rounds.model";
 
-export const ORDER_STATUSES = ["open", "locked", "ordered", "cancelled"] as const;
-export type OrderStatus = (typeof ORDER_STATUSES)[number];
-export type AdjustmentType = "tip" | "fee" | "discount";
-export type AdjustmentAllocation = "proportional" | "equal";
+export { ORDER_STATUSES, type OrderStatus, type AdjustmentType, type AdjustmentAllocation };
+export type OrderAdjustment = EmbeddedAdjustment;
+export type OrderPayment = EmbeddedPayment;
 
-export interface OrderAdjustment {
-  _id: Types.ObjectId;
-  label: string;
-  type: AdjustmentType;
-  amountCents: number;
-  allocation: AdjustmentAllocation;
-}
-
-export interface OrderPayment {
-  _id: Types.ObjectId;
-  participantId: Types.ObjectId;
-  amountCents: number;
-  method?: string | null;
-  note?: string | null;
-  receivedAt: Date;
-}
-
-export interface OrderDocument {
-  _id: Types.ObjectId;
+export interface OrderDocument extends Omit<EmbeddedOrder, "items"> {
   roundId: Types.ObjectId;
   placedByParticipantId: Types.ObjectId | null;
-  storeId: string;
-  storeSnapshot: { name: string; slug: string | null };
-  status: OrderStatus;
-  currency: string;
-  subtotalCents: number;
-  adjustmentsCents: number;
-  totalCents: number;
-  paidCents: number;
-  adjustments: OrderAdjustment[];
-  payments: OrderPayment[];
-  lockedAt?: Date | null;
-  orderedAt?: Date | null;
-  createdAt: Date;
   updatedAt: Date;
 }
 
-export const OrderSchema = new Schema<OrderDocument>(
+export const OrderSchema = new Schema(
   {
     roundId: { type: Schema.Types.ObjectId, ref: "Round", required: true },
     placedByParticipantId: { type: Schema.Types.ObjectId, default: null },

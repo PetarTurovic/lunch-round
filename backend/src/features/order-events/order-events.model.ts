@@ -1,17 +1,9 @@
 import mongoose, { Schema, type Types } from "mongoose";
 
 export const ORDER_EVENT_ACTIONS = [
-  "order_created",
-  "order_status_changed",
-  "selection_added",
-  "selection_removed",
-  "quantity_changed",
-  "price_overridden",
-  "price_restored",
-  "adjustment_added",
-  "adjustment_removed",
-  "payment_recorded",
-  "round_settled",
+  "order_created", "order_status_changed", "selection_added", "selection_removed",
+  "quantity_changed", "price_overridden", "price_restored", "adjustment_added",
+  "adjustment_removed", "payment_recorded", "round_settled",
 ] as const;
 export type OrderEventAction = (typeof ORDER_EVENT_ACTIONS)[number];
 

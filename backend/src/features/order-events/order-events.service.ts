@@ -17,32 +17,17 @@ export interface RecordEventInput {
 
 export const recordOrderEvent = async (input: RecordEventInput) =>
   OrderEvent.create({
-    roundId: input.roundId,
-    orderId: input.orderId ?? null,
-    actorParticipantId: input.actorParticipantId ?? null,
-    actorRole: input.actorRole ?? "system",
-    entity: input.entity,
-    entityId: input.entityId,
-    action: input.action,
-    field: input.field ?? null,
-    before: input.before ?? null,
-    after: input.after ?? null,
-    deltaCents: input.deltaCents ?? null,
-    changedAt: new Date(),
+    orderId: null, actorParticipantId: null, actorRole: "system",
+    field: null, before: null, after: null, deltaCents: null,
+    changedAt: new Date(), ...input,
   });
 
 export const getRoundMoneyTimelineService = async (roundId: Types.ObjectId) => {
   const events = await OrderEvent.find({ roundId }).sort({ changedAt: 1, _id: 1 }).lean();
   let running = 0;
   return events.map((e) => ({
-    at: e.changedAt,
-    actor: e.actorRole,
-    action: e.action,
-    entity: e.entity,
-    field: e.field,
-    before: e.before,
-    after: e.after,
-    deltaCents: e.deltaCents ?? 0,
+    at: e.changedAt, actor: e.actorRole, action: e.action, entity: e.entity,
+    field: e.field, before: e.before, after: e.after, deltaCents: e.deltaCents ?? 0,
     runningCents: (running += e.deltaCents ?? 0),
   }));
 };

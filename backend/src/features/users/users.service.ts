@@ -11,9 +11,9 @@ export interface AuthResponse {
   user: { id: string; email: string; name: string; createdAt: Date };
 }
 
-const authRes = (user: any): AuthResponse => ({
-  token: signUserToken({ _id: user._id, email: user.email, name: user.name }),
-  user: { id: user._id.toString(), email: user.email, name: user.name, createdAt: user.createdAt },
+const formatAuthResponse = (u: any): AuthResponse => ({
+  token: signUserToken({ _id: u._id, email: u.email, name: u.name }),
+  user: { id: u._id.toString(), email: u.email, name: u.name, createdAt: u.createdAt },
 });
 
 export const registerUserService = async (name: string, email: string, password?: string): Promise<AuthResponse> => {
@@ -21,7 +21,8 @@ export const registerUserService = async (name: string, email: string, password?
   if (await User.findOne({ email: normalizedEmail }).lean()) throw new ConflictError("A user with this email already exists");
   if (password && password.length < 6) throw new BadRequestError("Password must be at least 6 characters long");
   const passwordHash = password ? await bcrypt.hash(password, 10) : null;
-  return authRes(await User.create({ name: name.trim(), email: normalizedEmail, passwordHash }));
+  const user = await User.create({ name: name.trim(), email: normalizedEmail, passwordHash });
+  return formatAuthResponse(user);
 };
 
 export const loginUserService = async (email: string, password: string): Promise<AuthResponse> => {
@@ -29,7 +30,7 @@ export const loginUserService = async (email: string, password: string): Promise
   if (!user || !user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
     throw new UnauthorizedError("Invalid email or password");
   }
-  return authRes(user);
+  return formatAuthResponse(user);
 };
 
 export const getUserProfileService = async (userId: Types.ObjectId) => {
@@ -45,11 +46,11 @@ export const getUserProfileService = async (userId: Types.ObjectId) => {
   };
 };
 
-export const claimParticipantSessionService = async (userId: Types.ObjectId, roundId: Types.ObjectId, participantToken: string) => {
-  const participant = await resolveParticipantService(roundId, participantToken);
-  if (!participant) throw new NotFoundError("Participant session not found or invalid token");
-  if (participant.userId && !participant.userId.equals(userId)) throw new ConflictError("This participant is already claimed by another user");
-  const updated = await claimParticipantService(roundId, participant._id, userId);
-  await Round.updateOne({ _id: roundId, "organizer.participantId": participant._id, "organizer.userId": null }, { $set: { "organizer.userId": userId } });
+export const claimParticipantSessionService = async (userId: Types.ObjectId, roundId: Types.ObjectId, token: string) => {
+  const p = await resolveParticipantService(roundId, token);
+  if (!p) throw new NotFoundError("Participant session not found or invalid token");
+  if (p.userId && !p.userId.equals(userId)) throw new ConflictError("This participant is already claimed by another user");
+  const updated = await claimParticipantService(roundId, p._id, userId);
+  await Round.updateOne({ _id: roundId, "organizer.participantId": p._id, "organizer.userId": null }, { $set: { "organizer.userId": userId } });
   return updated;
 };
