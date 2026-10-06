@@ -1,11 +1,16 @@
-import mongoose, { Schema } from 'mongoose';
-import type { Types } from 'mongoose';
+import mongoose, { Schema } from "mongoose";
+import type { Types } from "mongoose";
 
-export const ORDER_STATUSES = ['open', 'locked', 'ordered', 'cancelled'] as const;
+export const ORDER_STATUSES = [
+  "open",
+  "locked",
+  "ordered",
+  "cancelled",
+] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-export type AdjustmentType = 'tip' | 'fee' | 'discount';
-export type AdjustmentAllocation = 'proportional' | 'equal';
+export type AdjustmentType = "tip" | "fee" | "discount";
+export type AdjustmentAllocation = "proportional" | "equal";
 
 export interface OrderAdjustment {
   _id: Types.ObjectId;
@@ -49,7 +54,7 @@ export interface OrderDocument {
 
 export const OrderSchema = new Schema<OrderDocument>(
   {
-    roundId: { type: Schema.Types.ObjectId, ref: 'Round', required: true },
+    roundId: { type: Schema.Types.ObjectId, ref: "Round", required: true },
     placedByParticipantId: { type: Schema.Types.ObjectId, default: null },
     storeId: { type: String, required: true },
     storeSnapshot: {
@@ -60,7 +65,7 @@ export const OrderSchema = new Schema<OrderDocument>(
       type: String,
       required: true,
       enum: ORDER_STATUSES,
-      default: 'open',
+      default: "open",
     },
     currency: { type: String, required: true, uppercase: true, maxlength: 3 },
 
@@ -77,14 +82,14 @@ export const OrderSchema = new Schema<OrderDocument>(
             type: {
               type: String,
               required: true,
-              enum: ['tip', 'fee', 'discount'],
+              enum: ["tip", "fee", "discount"],
             },
             amountCents: { type: Number, required: true, min: 0 },
             allocation: {
               type: String,
               required: true,
-              enum: ['proportional', 'equal'],
-              default: 'proportional',
+              enum: ["proportional", "equal"],
+              default: "proportional",
             },
           },
           { _id: true },
@@ -112,13 +117,13 @@ export const OrderSchema = new Schema<OrderDocument>(
     lockedAt: { type: Date, default: null },
     orderedAt: { type: Date, default: null },
   },
-  { collection: 'orders', timestamps: true, versionKey: false },
+  { collection: "orders", timestamps: true, versionKey: false },
 );
 
 OrderSchema.index({ roundId: 1, createdAt: 1 });
 OrderSchema.index({ storeId: 1 });
 
 export const Order =
-  mongoose.models.Order ?? mongoose.model('Order', OrderSchema);
+  mongoose.models.Order ?? mongoose.model("Order", OrderSchema);
 
 export default Order;

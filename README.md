@@ -27,12 +27,9 @@ The restaurants and their menus are harvested from delivery platforms into the
 
 ## State
 
-**backend/** — The catalogue was audited, redesigned and migrated in place: the
-menu is embedded in the store document, ratings are normalised onto a single
-0-5 scale, cities and cuisines are normalised, and the schema is now enforced
-by `$jsonSchema` validators rather than TypeScript alone. The order domain has
-its schemas, validators, indexes and settlement logic in place and tested; it
-has no HTTP surface yet. The frontend is still a skeleton.
+**backend/** — The catalogue is audited and normalized with embedded menus. The full order domain (rounds, participants, orders, selections, adjustments, payments, audit events, and settlement) is completely wired with two-tier authentication (JWT user accounts & participant session tokens) and tested HTTP APIs.
+
+**frontend/** — Full React 19 + Vite application with store browsing, round creation wizard, shareable links, live menu ordering, group item review, organizer price overrides, adjustment allocations, payment recording, and cent-accurate settlement ledger.
 
 ## Commands
 

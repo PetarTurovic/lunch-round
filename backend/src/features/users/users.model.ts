@@ -1,4 +1,4 @@
-import mongoose, { Schema } from 'mongoose';
+import mongoose, { Schema } from "mongoose";
 
 export interface UserDocument {
   _id: mongoose.Types.ObjectId;
@@ -22,12 +22,11 @@ export const UserSchema = new Schema<UserDocument>(
     name: { type: String, required: true, maxlength: 100, trim: true },
     passwordHash: { type: String, maxlength: 200, default: null },
   },
-  { collection: 'users', timestamps: true, versionKey: false },
+  { collection: "users", timestamps: true, versionKey: false },
 );
 
 UserSchema.index({ createdAt: -1 });
 
-export const User =
-  mongoose.models.User ?? mongoose.model('User', UserSchema);
+export const User = mongoose.models.User ?? mongoose.model("User", UserSchema);
 
 export default User;

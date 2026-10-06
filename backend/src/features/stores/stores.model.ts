@@ -1,6 +1,6 @@
-import mongoose, { Schema } from 'mongoose';
-import type { PaginateModel } from 'mongoose';
-import paginate from 'mongoose-paginate-v2';
+import mongoose, { Schema } from "mongoose";
+import type { PaginateModel } from "mongoose";
+import paginate from "mongoose-paginate-v2";
 import type {
   ItemOption,
   ItemOptionGroup,
@@ -10,7 +10,7 @@ import type {
   StoreLocation,
   StoreRating,
   StoreTaxonomy,
-} from './stores.types';
+} from "./stores.types";
 
 const ItemOptionSchema = new Schema<ItemOption>(
   {
@@ -65,9 +65,9 @@ const MenuSectionSchema = new Schema<MenuSection>(
   { _id: false },
 );
 
-const GeoPointSchema = new Schema<StoreLocation['coordinates']>(
+const GeoPointSchema = new Schema<StoreLocation["coordinates"]>(
   {
-    type: { type: String, enum: ['Point'], required: true },
+    type: { type: String, enum: ["Point"], required: true },
     coordinates: { type: [Number], required: true },
   },
   { _id: false },
@@ -86,7 +86,7 @@ const StoreLocationSchema = new Schema<StoreLocation>(
 const StoreRatingSchema = new Schema<StoreRating>(
   {
     value: { type: Number, min: 0, max: 5, default: null },
-    scale: { type: String, enum: ['percent', 'five_star'], required: true },
+    scale: { type: String, enum: ["percent", "five_star"], required: true },
     votes: { type: Number, min: 0, default: null },
     raw: { type: String, maxlength: 50, default: null },
   },
@@ -113,7 +113,12 @@ const StoreDeliverySchema = new Schema<StoreDelivery>(
 
 const StoreTaxonomySchema = new Schema<StoreTaxonomy>(
   {
-    kind: { type: String, required: true, maxlength: 50, default: 'restaurant' },
+    kind: {
+      type: String,
+      required: true,
+      maxlength: 50,
+      default: "restaurant",
+    },
     cuisines: { type: [String], default: [] },
     cuisineLabels: { type: [String], default: [] },
   },
@@ -128,7 +133,7 @@ export const StoreSchema = new Schema(
     platform: { type: String, required: true, maxlength: 50 },
     externalId: { type: String, required: true, maxlength: 100 },
     url: { type: String, maxlength: 500 },
-    currency: { type: String, required: true, maxlength: 3, default: 'EUR' },
+    currency: { type: String, required: true, maxlength: 3, default: "EUR" },
     taxonomy: { type: StoreTaxonomySchema, required: true },
     location: { type: StoreLocationSchema, required: true },
     rating: { type: StoreRatingSchema, required: true },
@@ -136,8 +141,8 @@ export const StoreSchema = new Schema(
     status: {
       type: String,
       required: true,
-      enum: ['active', 'inactive'],
-      default: 'active',
+      enum: ["active", "inactive"],
+      default: "active",
     },
     menu: {
       sections: { type: [MenuSectionSchema], default: [] },
@@ -152,7 +157,7 @@ export const StoreSchema = new Schema(
     },
   },
   {
-    collection: 'stores',
+    collection: "stores",
     timestamps: true,
     versionKey: false,
   },
@@ -160,17 +165,17 @@ export const StoreSchema = new Schema(
 
 StoreSchema.index({ platform: 1, externalId: 1 }, { unique: true });
 StoreSchema.index({ slug: 1 }, { unique: true });
-StoreSchema.index({ 'location.coordinates': '2dsphere' });
-StoreSchema.index({ status: 1, platform: 1, 'location.city': 1 });
-StoreSchema.index({ 'location.country': 1, 'location.city': 1 });
-StoreSchema.index({ 'taxonomy.cuisines': 1 });
-StoreSchema.index({ 'rating.value': -1 });
+StoreSchema.index({ "location.coordinates": "2dsphere" });
+StoreSchema.index({ status: 1, platform: 1, "location.city": 1 });
+StoreSchema.index({ "location.country": 1, "location.city": 1 });
+StoreSchema.index({ "taxonomy.cuisines": 1 });
+StoreSchema.index({ "rating.value": -1 });
 StoreSchema.index(
-  { name: 'text', 'taxonomy.cuisineLabels': 'text' },
-  { weights: { name: 10, 'taxonomy.cuisineLabels': 5 }, name: 'store_search' },
+  { name: "text", "taxonomy.cuisineLabels": "text" },
+  { weights: { name: 10, "taxonomy.cuisineLabels": 5 }, name: "store_search" },
 );
-StoreSchema.index({ 'menu.sections.items.price': 1 });
-StoreSchema.index({ 'menu.sections.key': 1 });
+StoreSchema.index({ "menu.sections.items.price": 1 });
+StoreSchema.index({ "menu.sections.key": 1 });
 
 StoreSchema.plugin(paginate);
 
@@ -186,7 +191,7 @@ export interface StoreDoc {
   location: StoreLocation;
   rating: StoreRating;
   delivery: StoreDelivery;
-  status: 'active' | 'inactive';
+  status: "active" | "inactive";
   menu: { sections: MenuSection[] };
   stats: { itemCount: number; sectionCount: number };
   provenance: { firstSeenAt: Date; lastSeenAt: Date };
@@ -197,6 +202,6 @@ export interface StoreDoc {
 export type StoreModel = PaginateModel<StoreDoc>;
 
 export const Store = (mongoose.models.Store ??
-  mongoose.model('Store', StoreSchema)) as unknown as StoreModel;
+  mongoose.model("Store", StoreSchema)) as unknown as StoreModel;
 
 export default Store;

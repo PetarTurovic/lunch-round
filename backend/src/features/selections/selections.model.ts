@@ -1,7 +1,7 @@
-import mongoose, { Schema } from 'mongoose';
-import type { Types } from 'mongoose';
+import mongoose, { Schema } from "mongoose";
+import type { Types } from "mongoose";
 
-export const SELECTION_STATUSES = ['active', 'removed'] as const;
+export const SELECTION_STATUSES = ["active", "removed"] as const;
 export type SelectionStatus = (typeof SELECTION_STATUSES)[number];
 
 export interface SelectionDocument {
@@ -32,9 +32,13 @@ export interface SelectionDocument {
 
 export const SelectionSchema = new Schema<SelectionDocument>(
   {
-    orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true },
-    participantId: { type: Schema.Types.ObjectId, ref: 'Participant', required: true },
-    roundId: { type: Schema.Types.ObjectId, ref: 'Round', required: true },
+    orderId: { type: Schema.Types.ObjectId, ref: "Order", required: true },
+    participantId: {
+      type: Schema.Types.ObjectId,
+      ref: "Participant",
+      required: true,
+    },
+    roundId: { type: Schema.Types.ObjectId, ref: "Round", required: true },
 
     storeId: { type: String, required: true },
     itemId: { type: String, required: true },
@@ -55,10 +59,10 @@ export const SelectionSchema = new Schema<SelectionDocument>(
       type: String,
       required: true,
       enum: SELECTION_STATUSES,
-      default: 'active',
+      default: "active",
     },
   },
-  { collection: 'selections', timestamps: true, versionKey: false },
+  { collection: "selections", timestamps: true, versionKey: false },
 );
 
 SelectionSchema.index({ orderId: 1, participantId: 1, status: 1 });
@@ -70,6 +74,6 @@ SelectionSchema.index(
 );
 
 export const Selection =
-  mongoose.models.Selection ?? mongoose.model('Selection', SelectionSchema);
+  mongoose.models.Selection ?? mongoose.model("Selection", SelectionSchema);
 
 export default Selection;

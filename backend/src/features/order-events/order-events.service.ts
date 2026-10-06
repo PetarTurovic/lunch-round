@@ -1,14 +1,14 @@
-import type { Types } from 'mongoose';
-import { OrderEvent } from './order-events.model';
-import type { OrderEventAction } from './order-events.model';
-import { Selection } from '../selections/selections.model';
+import type { Types } from "mongoose";
+import { OrderEvent } from "./order-events.model";
+import type { OrderEventAction } from "./order-events.model";
+import { Selection } from "../selections/selections.model";
 
 export interface RecordEventInput {
   roundId: Types.ObjectId;
   orderId?: Types.ObjectId | null;
   actorParticipantId?: Types.ObjectId | null;
-  actorRole?: 'participant' | 'organizer' | 'system';
-  entity: 'order' | 'selection' | 'round';
+  actorRole?: "participant" | "organizer" | "system";
+  entity: "order" | "selection" | "round";
   entityId: string;
   action: OrderEventAction;
   field?: string | null;
@@ -22,7 +22,7 @@ export const recordOrderEvent = async (input: RecordEventInput) => {
     roundId: input.roundId,
     orderId: input.orderId ?? null,
     actorParticipantId: input.actorParticipantId ?? null,
-    actorRole: input.actorRole ?? 'system',
+    actorRole: input.actorRole ?? "system",
     entity: input.entity,
     entityId: input.entityId,
     action: input.action,
@@ -55,11 +55,11 @@ export const overrideSelectionPriceService = async (
     roundId: selection.roundId,
     orderId: selection.orderId,
     actorParticipantId,
-    actorRole: 'organizer',
-    entity: 'selection',
+    actorRole: "organizer",
+    entity: "selection",
     entityId: selection.itemId,
-    action: restoringMenuPrice ? 'price_restored' : 'price_overridden',
-    field: 'unitPriceCents',
+    action: restoringMenuPrice ? "price_restored" : "price_overridden",
+    field: "unitPriceCents",
     before: previous,
     after: newUnitPriceCents,
     deltaCents: (newUnitPriceCents - previous) * selection.quantity,

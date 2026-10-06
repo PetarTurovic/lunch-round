@@ -1,6 +1,6 @@
 export interface StoreRating {
   value: number | null;
-  scale: 'percent' | 'five_star';
+  scale: "percent" | "five_star";
   votes: number | null;
   raw: string | null;
 }
@@ -10,7 +10,7 @@ export interface StoreLocation {
   city: string;
   cityLabel: string;
   coordinates: {
-    type: 'Point';
+    type: "Point";
     coordinates: [number, number];
   } | null;
 }
@@ -67,5 +67,3 @@ export interface MenuSection {
   position: number;
   items: MenuItem[];
 }
-
-

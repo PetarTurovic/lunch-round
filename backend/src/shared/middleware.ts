@@ -1,9 +1,9 @@
-import cors from 'cors';
-import type { ErrorRequestHandler, RequestHandler } from 'express';
-import { AppError } from './errors';
+import cors from "cors";
+import type { ErrorRequestHandler, RequestHandler } from "express";
+import { AppError } from "./errors";
 
 export const corsOptions: cors.CorsOptions = {
-  origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
+  origin: process.env.CORS_ORIGIN?.split(",") ?? "*",
 };
 
 export const notFound: RequestHandler = (req, _res, next) => {
@@ -16,27 +16,43 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
 
   const isOperational = err instanceof AppError;
-  const isValidationError = (err as { name?: string })?.name === 'ValidationError';
-  const statusCode = isOperational
-    ? err.statusCode
-    : isValidationError
-      ? 400
-      : 500;
-  const message = isOperational
-    ? err.message
-    : isValidationError
-      ? (err as Error).message
-      : 'Internal server error';
+  const isValidationError =
+    (err as { name?: string })?.name === "ValidationError";
+  const isZodError = (err as { name?: string })?.name === "ZodError";
+
+  let statusCode = 500;
+  let message = "Internal server error";
+
+  if (isOperational) {
+    statusCode = err.statusCode;
+    message = err.message;
+  } else if (isZodError) {
+    statusCode = 400;
+    const issues = (
+      err as {
+        issues?: Array<{ message: string; path: Array<string | number> }>;
+      }
+    ).issues;
+    message =
+      issues && issues.length > 0
+        ? issues
+            .map((i) => `${i.path.join(".") || "field"}: ${i.message}`)
+            .join(", ")
+        : "Validation failed";
+  } else if (isValidationError) {
+    statusCode = 400;
+    message = (err as Error).message;
+  }
 
   if (!isOperational) {
-    console.error('Unhandled error:', err);
+    console.error("Unhandled error:", err);
   }
 
   res.status(statusCode).json({
     error: {
       message,
       status: statusCode,
-      ...(process.env.NODE_ENV !== 'production' && err instanceof Error
+      ...(process.env.NODE_ENV !== "production" && err instanceof Error
         ? { stack: err.stack }
         : {}),
     },

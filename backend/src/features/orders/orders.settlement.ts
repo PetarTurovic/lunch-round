@@ -1,5 +1,5 @@
-import type { Types } from 'mongoose';
-import type { OrderAdjustment } from './orders.model';
+import type { Types } from "mongoose";
+import type { OrderAdjustment } from "./orders.model";
 
 export interface SettlementSelection {
   participantId: Types.ObjectId;
@@ -36,11 +36,14 @@ export interface SettledRound {
   currency: string;
   totalCents: number;
   orders: SettledOrder[];
-  perParticipant: Map<string, { itemsCents: number; adjustmentsCents: number; totalCents: number }>;
+  perParticipant: Map<
+    string,
+    { itemsCents: number; adjustmentsCents: number; totalCents: number }
+  >;
 }
 
 export const adjustmentSign = (adjustment: OrderAdjustment): number =>
-  adjustment.type === 'discount' ? -1 : 1;
+  adjustment.type === "discount" ? -1 : 1;
 
 const allocate = (amountCents: number, weights: number[]): number[] => {
   const total = weights.reduce((sum, weight) => sum + weight, 0);
@@ -81,8 +84,11 @@ export const settleOrder = (input: SettlementOrderInput): SettledOrder => {
   const adjustmentTotals = ids.map(() => 0);
   for (const adjustment of input.adjustments) {
     const weights =
-      adjustment.allocation === 'equal' ? ids.map(() => 1) : items;
-    const parts = allocate(adjustmentSign(adjustment) * adjustment.amountCents, weights);
+      adjustment.allocation === "equal" ? ids.map(() => 1) : items;
+    const parts = allocate(
+      adjustmentSign(adjustment) * adjustment.amountCents,
+      weights,
+    );
     for (let i = 0; i < ids.length; i += 1) adjustmentTotals[i] += parts[i];
   }
 
@@ -93,7 +99,10 @@ export const settleOrder = (input: SettlementOrderInput): SettledOrder => {
     totalCents: items[index] + adjustmentTotals[index],
   }));
 
-  const adjustmentsCents = adjustmentTotals.reduce((sum, value) => sum + value, 0);
+  const adjustmentsCents = adjustmentTotals.reduce(
+    (sum, value) => sum + value,
+    0,
+  );
 
   return {
     orderId: input.orderId,
@@ -111,19 +120,30 @@ export const settleRound = (
   currency: string,
 ): SettledRound => {
   const settledOrders = orders.map(settleOrder);
-  const totalCents = settledOrders.reduce((sum, order) => sum + order.totalCents, 0);
+  const totalCents = settledOrders.reduce(
+    (sum, order) => sum + order.totalCents,
+    0,
+  );
 
   const perParticipant = new Map<
     string,
     { itemsCents: number; adjustmentsCents: number; totalCents: number }
   >();
   for (const id of participantIds) {
-    perParticipant.set(id.toString(), { itemsCents: 0, adjustmentsCents: 0, totalCents: 0 });
+    perParticipant.set(id.toString(), {
+      itemsCents: 0,
+      adjustmentsCents: 0,
+      totalCents: 0,
+    });
   }
   for (const order of settledOrders) {
     for (const line of order.perParticipant) {
       const key = line.participantId.toString();
-      const entry = perParticipant.get(key) ?? { itemsCents: 0, adjustmentsCents: 0, totalCents: 0 };
+      const entry = perParticipant.get(key) ?? {
+        itemsCents: 0,
+        adjustmentsCents: 0,
+        totalCents: 0,
+      };
       entry.itemsCents += line.itemsCents;
       entry.adjustmentsCents += line.adjustmentsCents;
       entry.totalCents += line.totalCents;
