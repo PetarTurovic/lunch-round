@@ -19,10 +19,9 @@ import {
 } from "./rounds.service";
 import { joinRoundService } from "../participants/participants.service";
 import { getRoundMoneyTimelineService } from "../order-events/order-events.service";
-import { BadRequestError } from "../../shared/errors";
 
-const paramStr = (val: string | string[] | undefined): string =>
-  String(Array.isArray(val) ? val[0] : val || "");
+const toId = (val: unknown): Types.ObjectId =>
+  new Types.ObjectId(String(Array.isArray(val) ? val[0] : val));
 
 export const createRoundController = async (
   req: Request,
@@ -40,17 +39,10 @@ export const createRoundController = async (
     });
 
     const body = schema.parse(req.body);
-    const userId = new Types.ObjectId(req.user!.id);
-    const organizerName = body.organizerName?.trim() || req.user!.name;
-
     const result = await createRoundService({
-      title: body.title,
-      shortlist: body.shortlist,
-      currency: body.currency,
-      notes: body.notes,
-      closesAt: body.closesAt,
-      organizerName,
-      userId,
+      ...body,
+      organizerName: body.organizerName?.trim() || req.user!.name,
+      userId: new Types.ObjectId(req.user!.id),
     });
 
     res.status(201).json(result);
@@ -71,9 +63,8 @@ export const getRoundsController = async (
       })
       .parse(req.query);
 
-    const userId = new Types.ObjectId(req.user!.id);
     const rounds = await getRoundsService({
-      userId,
+      userId: new Types.ObjectId(req.user!.id),
       limit: query.limit,
     });
 
@@ -89,7 +80,8 @@ export const getRoundController = async (
   next: NextFunction,
 ) => {
   try {
-    const idOrSlug = z.string().parse(paramStr(req.params.idOrSlug));
+    const raw = req.params.idOrSlug;
+    const idOrSlug = String(Array.isArray(raw) ? raw[0] : raw);
     const roundData = await getRoundByIdOrSlugService(idOrSlug);
     res.json({ round: roundData });
   } catch (error) {
@@ -143,7 +135,6 @@ export const joinRoundController = async (
 
     const body = schema.parse(req.body);
     const userId = req.user ? new Types.ObjectId(req.user.id) : null;
-
     const result = await joinRoundService(req.round!._id, body.name, userId);
     res.status(201).json(result);
   } catch (error) {
@@ -198,7 +189,7 @@ export const updateSelectionController = async (
   next: NextFunction,
 ) => {
   try {
-    const selectionId = new Types.ObjectId(paramStr(req.params.selectionId));
+    const selectionId = toId(req.params.selectionId);
     const schema = z.object({
       quantity: z.number().int().min(0).max(99).optional(),
       note: z.string().max(300).optional(),
@@ -225,7 +216,7 @@ export const removeSelectionController = async (
   next: NextFunction,
 ) => {
   try {
-    const selectionId = new Types.ObjectId(paramStr(req.params.selectionId));
+    const selectionId = toId(req.params.selectionId);
     const result = await removeSelectionService(
       req.round!._id,
       selectionId,
@@ -244,7 +235,7 @@ export const overridePriceController = async (
   next: NextFunction,
 ) => {
   try {
-    const selectionId = new Types.ObjectId(paramStr(req.params.selectionId));
+    const selectionId = toId(req.params.selectionId);
     const schema = z.object({
       unitPriceCents: z.number().int().min(0),
     });
@@ -269,7 +260,7 @@ export const addAdjustmentController = async (
   next: NextFunction,
 ) => {
   try {
-    const orderId = new Types.ObjectId(paramStr(req.params.orderId));
+    const orderId = toId(req.params.orderId);
     const schema = z.object({
       label: z.string().min(1).max(80),
       type: z.enum(["tip", "fee", "discount"]),
@@ -297,8 +288,8 @@ export const removeAdjustmentController = async (
   next: NextFunction,
 ) => {
   try {
-    const orderId = new Types.ObjectId(paramStr(req.params.orderId));
-    const adjustmentId = new Types.ObjectId(paramStr(req.params.adjustmentId));
+    const orderId = toId(req.params.orderId);
+    const adjustmentId = toId(req.params.adjustmentId);
     const order = await removeAdjustmentFromOrderService(
       req.round!._id,
       orderId,
@@ -318,7 +309,7 @@ export const recordPaymentController = async (
   next: NextFunction,
 ) => {
   try {
-    const orderId = new Types.ObjectId(paramStr(req.params.orderId));
+    const orderId = toId(req.params.orderId);
     const schema = z.object({
       participantId: z.string(),
       amountCents: z.number().int().min(1),

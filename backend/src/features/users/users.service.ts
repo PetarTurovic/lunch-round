@@ -107,7 +107,7 @@ export const getUserProfileService = async (userId: Types.ObjectId) => {
 
   const [organizedRounds, joinedRounds] = await Promise.all([
     Round.countDocuments({ "organizer.userId": userId }),
-    Round.countDocuments({}),
+    Round.countDocuments({ "participants.userId": userId }),
   ]);
 
   return {

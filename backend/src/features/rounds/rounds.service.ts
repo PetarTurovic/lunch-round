@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { Types } from "mongoose";
+import type { HydratedDocument } from "mongoose";
 import { Round } from "./rounds.model";
 import type {
   RoundDocument,
@@ -14,6 +15,7 @@ import type {
   AdjustmentAllocation,
 } from "./rounds.model";
 import { Store } from "../stores/stores.model";
+import { OrderEvent } from "../order-events/order-events.model";
 import { hashToken, generateToken } from "../participants/participants.service";
 import { recordOrderEvent } from "../order-events/order-events.service";
 import { settleRound, SettlementOrderInput } from "../orders/orders.settlement";
@@ -23,6 +25,8 @@ import {
   ForbiddenError,
 } from "../../shared/errors";
 
+// --- Helpers ---
+
 export const deriveRoundStatus = (
   orders: EmbeddedOrder[],
   closesAt?: Date | null,
@@ -31,17 +35,127 @@ export const deriveRoundStatus = (
   if (live.length === 0) {
     return closesAt && closesAt.getTime() < Date.now() ? "locked" : "open";
   }
-
   if (live.some((order) => order.status === "open")) return "open";
-
   if (!live.every((order) => order.status === "ordered")) return "locked";
   return live.every((order) => order.paidCents >= order.totalCents)
     ? "settled"
     : "ordered";
 };
 
+export const recalculateOrderTotals = (order: EmbeddedOrder): EmbeddedOrder => {
+  const activeItems = order.items.filter((i) => i.status === "active");
+  const subtotalCents = activeItems.reduce(
+    (sum, s) => sum + s.unitPriceCents * s.quantity,
+    0,
+  );
+  const adjustmentsCents = order.adjustments.reduce((sum, a) => {
+    return a.type === "discount" ? sum - a.amountCents : sum + a.amountCents;
+  }, 0);
+
+  order.subtotalCents = subtotalCents;
+  order.adjustmentsCents = adjustmentsCents;
+  order.totalCents = Math.max(0, subtotalCents + adjustmentsCents);
+  return order;
+};
+
+const saveRoundOrders = async (
+  round: HydratedDocument<RoundDocument>,
+): Promise<void> => {
+  round.status = deriveRoundStatus(round.orders, round.closesAt);
+  round.markModified("orders");
+  await round.save();
+};
+
+const findSelection = (
+  round: HydratedDocument<RoundDocument>,
+  selectionId: Types.ObjectId,
+): { order: EmbeddedOrder; item: EmbeddedOrderItem } => {
+  for (const order of round.orders) {
+    const item = order.items.find((i: EmbeddedOrderItem) =>
+      i._id.equals(selectionId),
+    );
+    if (item) return { order, item };
+  }
+  throw new NotFoundError("Selection");
+};
+
+const findOrder = (
+  round: HydratedDocument<RoundDocument>,
+  orderId: Types.ObjectId,
+): EmbeddedOrder => {
+  const order = round.orders.find((o: EmbeddedOrder) => o._id.equals(orderId));
+  if (!order) throw new NotFoundError("Order");
+  return order;
+};
+
+export const calculateRoundSettlement = (round: {
+  currency: string;
+  orders: EmbeddedOrder[];
+  participants: EmbeddedParticipant[];
+}) => {
+  if (round.orders.length === 0 || round.participants.length === 0) {
+    return null;
+  }
+
+  const participantIds = round.participants.map((p) => p._id);
+  const inputs: SettlementOrderInput[] = round.orders.map((order) => ({
+    orderId: order._id,
+    storeName: order.storeSnapshot.name,
+    subtotalCents: order.subtotalCents,
+    adjustments: order.adjustments,
+    participantIds,
+    selections: order.items
+      .filter((i) => i.status === "active")
+      .map((i) => ({
+        participantId: i.participantId,
+        unitPriceCents: i.unitPriceCents,
+        quantity: i.quantity,
+      })),
+  }));
+
+  const settled = settleRound(inputs, participantIds, round.currency);
+
+  const paidByParticipant = new Map<string, number>();
+  for (const order of round.orders) {
+    for (const pay of order.payments || []) {
+      const key = pay.participantId.toString();
+      paidByParticipant.set(
+        key,
+        (paidByParticipant.get(key) ?? 0) + pay.amountCents,
+      );
+    }
+  }
+
+  const perParticipant: RoundSettlementLine[] = round.participants.map((p) => {
+    const line = settled.perParticipant.get(p._id.toString()) || {
+      itemsCents: 0,
+      adjustmentsCents: 0,
+      totalCents: 0,
+    };
+    const paidCents = paidByParticipant.get(p._id.toString()) ?? 0;
+    return {
+      participantId: p._id,
+      participantName: p.name,
+      orderId: null,
+      orderLabel: "Round Total",
+      itemsCents: line.itemsCents,
+      adjustmentsCents: line.adjustmentsCents,
+      totalCents: line.totalCents,
+      paidCents,
+      outstandingCents: Math.max(0, line.totalCents - paidCents),
+    };
+  });
+
+  return {
+    totalCents: settled.totalCents,
+    orders: settled.orders,
+    perParticipant,
+  };
+};
+
+// --- Round Lifecycle Services ---
+
 export const deleteRoundCascadeService = async (roundId: Types.ObjectId) => {
-  const { OrderEvent } = await import("../order-events/order-events.model");
   const [events, round] = await Promise.all([
     OrderEvent.deleteMany({ roundId }),
     Round.deleteOne({ _id: roundId }),
@@ -56,32 +170,27 @@ export const deleteRoundCascadeService = async (roundId: Types.ObjectId) => {
   };
 };
 
-export const countDanglingReferencesService = async (
-  roundId: Types.ObjectId,
-) => {
-  const { OrderEvent } = await import("../order-events/order-events.model");
-  const events = await OrderEvent.countDocuments({ roundId });
-  return { orders: 0, selections: 0, participants: 0, events, total: events };
-};
-
-export interface CreateRoundInput {
+export const createRoundService = async (input: {
   title: string;
-  shortlist: string[];
-  currency?: string;
   notes?: string;
-  closesAt?: Date | null;
+  shortlist: string[];
   organizerName: string;
   userId: Types.ObjectId;
-}
-
-export const createRoundService = async (input: CreateRoundInput) => {
+  currency?: string;
+  closesAt?: Date;
+}) => {
+  if (!input.title?.trim()) {
+    throw new BadRequestError("Round title is required");
+  }
+  if (!input.organizerName?.trim()) {
+    throw new BadRequestError("Organizer name is required");
+  }
   if (!input.shortlist || input.shortlist.length === 0) {
     throw new BadRequestError(
       "A round needs at least one restaurant in the shortlist",
     );
   }
 
-  // Verify stores exist and create snapshot for shortlist
   const stores = await Store.find({ _id: { $in: input.shortlist } })
     .select("_id name slug platform currency rating stats")
     .lean();
@@ -100,10 +209,6 @@ export const createRoundService = async (input: CreateRoundInput) => {
     itemCount: s.stats?.itemCount ?? 0,
   }));
 
-  const currency = input.currency || stores[0].currency || "EUR";
-  const slug = randomBytes(4).toString("hex");
-
-  // Create organizer participant with token
   const organizerToken = generateToken();
   const organizerParticipantId = new Types.ObjectId();
   const organizerParticipant = {
@@ -115,10 +220,10 @@ export const createRoundService = async (input: CreateRoundInput) => {
   };
 
   const round = await Round.create({
-    slug,
+    slug: randomBytes(4).toString("hex"),
     title: input.title.trim(),
     notes: input.notes?.trim() || undefined,
-    currency,
+    currency: input.currency || stores[0].currency || "EUR",
     organizer: {
       participantId: organizerParticipantId,
       name: input.organizerName.trim(),
@@ -131,11 +236,7 @@ export const createRoundService = async (input: CreateRoundInput) => {
     closesAt: input.closesAt ?? null,
   });
 
-  return {
-    round,
-    organizerToken,
-    organizerParticipant,
-  };
+  return { round, organizerToken, organizerParticipant };
 };
 
 export const getRoundsService = async (filter: {
@@ -143,8 +244,6 @@ export const getRoundsService = async (filter: {
   limit?: number;
 }) => {
   const limit = Math.min(filter.limit || 20, 50);
-
-  // Directly find rounds where the user is organizer or in participants
   return Round.find({
     $or: [
       { "organizer.userId": filter.userId },
@@ -161,104 +260,33 @@ export const getRoundByIdOrSlugService = async (idOrSlug: string) => {
     ? { $or: [{ _id: new Types.ObjectId(idOrSlug) }, { slug: idOrSlug }] }
     : { slug: idOrSlug };
 
-  // EXACTLY 1 QUERY TO FETCH EVERYTHING!
   const round = await Round.findOne(query).lean();
-  if (!round) {
-    throw new NotFoundError("Round");
-  }
+  if (!round) throw new NotFoundError("Round");
 
-  // Compute live settlement in memory if not already settled
-  let computedSettlement: unknown = round.settlement;
-  if (
-    !computedSettlement &&
-    round.orders.length > 0 &&
-    round.participants.length > 0
-  ) {
-    const participantIds = round.participants.map(
-      (p: EmbeddedParticipant) => p._id,
-    );
-    const inputs: SettlementOrderInput[] = round.orders.map(
-      (order: EmbeddedOrder) => {
-        const activeItems = order.items.filter(
-          (i: EmbeddedOrderItem) => i.status === "active",
-        );
-        return {
-          orderId: order._id,
-          storeName: order.storeSnapshot.name,
-          subtotalCents: order.subtotalCents,
-          adjustments: order.adjustments,
-          participantIds,
-          selections: activeItems.map((i: EmbeddedOrderItem) => ({
-            participantId: i.participantId,
-            unitPriceCents: i.unitPriceCents,
-            quantity: i.quantity,
-          })),
-        };
-      },
-    );
-
-    const settled = settleRound(inputs, participantIds, round.currency);
-
-    const paidByParticipant = new Map<string, number>();
-    for (const order of round.orders) {
-      for (const pay of order.payments || []) {
-        const key = pay.participantId.toString();
-        paidByParticipant.set(
-          key,
-          (paidByParticipant.get(key) ?? 0) + pay.amountCents,
-        );
-      }
-    }
-
-    const perParticipantLines = round.participants.map(
-      (p: EmbeddedParticipant) => {
-        const line = settled.perParticipant.get(p._id.toString()) || {
-          itemsCents: 0,
-          adjustmentsCents: 0,
-          totalCents: 0,
-        };
-        const paidCents = paidByParticipant.get(p._id.toString()) ?? 0;
-        return {
-          participantId: p._id,
-          participantName: p.name,
-          itemsCents: line.itemsCents,
-          adjustmentsCents: line.adjustmentsCents,
-          totalCents: line.totalCents,
-          paidCents,
-          outstandingCents: Math.max(0, line.totalCents - paidCents),
-        };
-      },
-    );
-
-    computedSettlement = {
-      isLive: true,
-      currency: round.currency,
-      totalCents: settled.totalCents,
-      orders: settled.orders,
-      perParticipant: perParticipantLines,
-    };
-  }
-
-  // Flatten selections for backwards compatibility with UI components
-  const selections = round.orders.flatMap((order: EmbeddedOrder) =>
-    order.items.map((item: EmbeddedOrderItem) => ({
-      ...item,
-      orderId: order._id,
-      roundId: round._id,
-      storeId: order.storeId,
-    })),
-  );
+  const settlement = round.settlement || calculateRoundSettlement(round);
 
   return {
     ...round,
-    shortlistStores: round.shortlist, // Already snapshotted!
+    shortlistStores: round.shortlist,
     participants: round.participants.map((p: EmbeddedParticipant) => ({
       ...p,
       isOrganizer: round.organizer.participantId.equals(p._id),
     })),
-    orders: round.orders,
-    selections,
-    settlementView: computedSettlement,
+    selections: round.orders.flatMap((o: EmbeddedOrder) =>
+      o.items.map((i: EmbeddedOrderItem) => ({
+        ...i,
+        orderId: o._id,
+        roundId: round._id,
+        storeId: o.storeId,
+      })),
+    ),
+    settlementView: settlement
+      ? {
+          isLive: !round.settlement,
+          currency: round.currency,
+          ...settlement,
+        }
+      : null,
   };
 };
 
@@ -272,10 +300,7 @@ export const updateRoundService = async (
   },
 ) => {
   const round = await Round.findById(roundId);
-  if (!round) {
-    throw new NotFoundError("Round");
-  }
-
+  if (!round) throw new NotFoundError("Round");
   if (round.status === "settled") {
     throw new BadRequestError("Cannot modify a settled round");
   }
@@ -307,22 +332,7 @@ export const updateRoundService = async (
   return round;
 };
 
-export const recalculateOrderTotals = (order: EmbeddedOrder) => {
-  const activeItems = order.items.filter((i) => i.status === "active");
-  const subtotalCents = activeItems.reduce(
-    (sum, s) => sum + s.unitPriceCents * s.quantity,
-    0,
-  );
-
-  const adjustmentsCents = order.adjustments.reduce((sum, a) => {
-    return a.type === "discount" ? sum - a.amountCents : sum + a.amountCents;
-  }, 0);
-
-  order.subtotalCents = subtotalCents;
-  order.adjustmentsCents = adjustmentsCents;
-  order.totalCents = Math.max(0, subtotalCents + adjustmentsCents);
-  return order;
-};
+// --- Selection Operations ---
 
 export const addSelectionService = async (
   roundId: Types.ObjectId,
@@ -336,7 +346,6 @@ export const addSelectionService = async (
 ) => {
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
-
   if (round.status === "locked" || round.status === "settled") {
     throw new BadRequestError(`Cannot add items: round is ${round.status}`);
   }
@@ -350,7 +359,6 @@ export const addSelectionService = async (
     );
   }
 
-  // Find store and item
   const store = await Store.findById(data.storeId).lean();
   if (!store) throw new NotFoundError("Store");
 
@@ -371,13 +379,9 @@ export const addSelectionService = async (
     }
   }
 
-  if (!foundItem) {
-    throw new NotFoundError("Menu item");
-  }
-
+  if (!foundItem) throw new NotFoundError("Menu item");
   const unitPriceCents = Math.round((foundItem.price ?? 0) * 100);
 
-  // Find or create embedded order
   let order = round.orders.find(
     (o: EmbeddedOrder) => o.storeId === data.storeId,
   );
@@ -404,7 +408,6 @@ export const addSelectionService = async (
     throw new BadRequestError(`Cannot add items: order is ${order.status}`);
   }
 
-  // Find or create item line
   let item = order.items.find(
     (i: EmbeddedOrderItem) =>
       i.participantId.equals(participantId) && i.itemId === data.itemId,
@@ -441,9 +444,7 @@ export const addSelectionService = async (
   }
 
   recalculateOrderTotals(order);
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  await saveRoundOrders(round);
 
   await recordOrderEvent({
     roundId,
@@ -470,27 +471,13 @@ export const updateSelectionService = async (
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
 
-  let targetOrder: EmbeddedOrder | null = null;
-  let targetItem: EmbeddedOrderItem | null = null;
+  const { order, item } = findSelection(round, selectionId);
 
-  for (const order of round.orders) {
-    const it = order.items.find((i: EmbeddedOrderItem) =>
-      i._id.equals(selectionId),
-    );
-    if (it) {
-      targetOrder = order;
-      targetItem = it;
-      break;
-    }
-  }
-
-  if (!targetOrder || !targetItem) throw new NotFoundError("Selection");
-
-  if (!isOrganizer && !targetItem.participantId.equals(participantId)) {
+  if (!isOrganizer && !item.participantId.equals(participantId)) {
     throw new ForbiddenError("You can only modify your own selections");
   }
 
-  const previousQty = targetItem.quantity;
+  const previousQty = item.quantity;
   if (data.quantity !== undefined) {
     if (data.quantity <= 0) {
       return removeSelectionService(
@@ -500,34 +487,31 @@ export const updateSelectionService = async (
         isOrganizer,
       );
     }
-    targetItem.quantity = data.quantity;
+    item.quantity = data.quantity;
   }
   if (data.note !== undefined) {
-    targetItem.note = data.note.trim() || null;
+    item.note = data.note.trim() || null;
   }
 
-  recalculateOrderTotals(targetOrder);
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  recalculateOrderTotals(order);
+  await saveRoundOrders(round);
 
   if (data.quantity !== undefined && data.quantity !== previousQty) {
     await recordOrderEvent({
       roundId,
-      orderId: targetOrder._id,
+      orderId: order._id,
       actorParticipantId: participantId,
       actorRole: isOrganizer ? "organizer" : "participant",
       entity: "selection",
-      entityId: targetItem.itemId,
+      entityId: item.itemId,
       action: "quantity_changed",
       before: previousQty,
-      after: targetItem.quantity,
-      deltaCents:
-        (targetItem.quantity - previousQty) * targetItem.unitPriceCents,
+      after: item.quantity,
+      deltaCents: (item.quantity - previousQty) * item.unitPriceCents,
     });
   }
 
-  return targetItem;
+  return item;
 };
 
 export const removeSelectionService = async (
@@ -539,43 +523,27 @@ export const removeSelectionService = async (
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
 
-  let targetOrder: EmbeddedOrder | null = null;
-  let targetItem: EmbeddedOrderItem | null = null;
+  const { order, item } = findSelection(round, selectionId);
 
-  for (const order of round.orders) {
-    const it = order.items.find((i: EmbeddedOrderItem) =>
-      i._id.equals(selectionId),
-    );
-    if (it) {
-      targetOrder = order;
-      targetItem = it;
-      break;
-    }
-  }
-
-  if (!targetOrder || !targetItem) throw new NotFoundError("Selection");
-
-  if (!isOrganizer && !targetItem.participantId.equals(participantId)) {
+  if (!isOrganizer && !item.participantId.equals(participantId)) {
     throw new ForbiddenError("You can only remove your own selections");
   }
 
-  targetItem.status = "removed";
-  recalculateOrderTotals(targetOrder);
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  item.status = "removed";
+  recalculateOrderTotals(order);
+  await saveRoundOrders(round);
 
   await recordOrderEvent({
     roundId,
-    orderId: targetOrder._id,
+    orderId: order._id,
     actorParticipantId: participantId,
     actorRole: isOrganizer ? "organizer" : "participant",
     entity: "selection",
-    entityId: targetItem.itemId,
+    entityId: item.itemId,
     action: "selection_removed",
-    before: targetItem.quantity,
+    before: item.quantity,
     after: 0,
-    deltaCents: -(targetItem.quantity * targetItem.unitPriceCents),
+    deltaCents: -(item.quantity * item.unitPriceCents),
   });
 
   return { success: true };
@@ -590,49 +558,34 @@ export const overrideSelectionPriceInRoundService = async (
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
 
-  let targetOrder: EmbeddedOrder | null = null;
-  let targetItem: EmbeddedOrderItem | null = null;
+  const { order, item } = findSelection(round, selectionId);
+  const previousPrice = item.unitPriceCents;
+  const restoringMenuPrice = unitPriceCents === item.menuUnitPriceCents;
 
-  for (const order of round.orders) {
-    const it = order.items.find((i: EmbeddedOrderItem) =>
-      i._id.equals(selectionId),
-    );
-    if (it) {
-      targetOrder = order;
-      targetItem = it;
-      break;
-    }
-  }
+  item.unitPriceCents = unitPriceCents;
+  item.priceOverridden = !restoringMenuPrice;
 
-  if (!targetOrder || !targetItem) throw new NotFoundError("Selection");
-
-  const previousPrice = targetItem.unitPriceCents;
-  const restoringMenuPrice = unitPriceCents === targetItem.menuUnitPriceCents;
-
-  targetItem.unitPriceCents = unitPriceCents;
-  targetItem.priceOverridden = !restoringMenuPrice;
-
-  recalculateOrderTotals(targetOrder);
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  recalculateOrderTotals(order);
+  await saveRoundOrders(round);
 
   await recordOrderEvent({
     roundId,
-    orderId: targetOrder._id,
+    orderId: order._id,
     actorParticipantId,
     actorRole: "organizer",
     entity: "selection",
-    entityId: targetItem.itemId,
+    entityId: item.itemId,
     action: restoringMenuPrice ? "price_restored" : "price_overridden",
     field: "unitPriceCents",
     before: previousPrice,
     after: unitPriceCents,
-    deltaCents: (unitPriceCents - previousPrice) * targetItem.quantity,
+    deltaCents: (unitPriceCents - previousPrice) * item.quantity,
   });
 
   return unitPriceCents;
 };
+
+// --- Order Adjustments & Payments ---
 
 export const addAdjustmentToOrderService = async (
   roundId: Types.ObjectId,
@@ -648,9 +601,7 @@ export const addAdjustmentToOrderService = async (
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
 
-  const order = round.orders.find((o: EmbeddedOrder) => o._id.equals(orderId));
-  if (!order) throw new NotFoundError("Order");
-
+  const order = findOrder(round, orderId);
   const adjId = new Types.ObjectId();
   const newAdj: EmbeddedAdjustment = {
     _id: adjId,
@@ -662,9 +613,7 @@ export const addAdjustmentToOrderService = async (
 
   order.adjustments.push(newAdj);
   recalculateOrderTotals(order);
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  await saveRoundOrders(round);
 
   const delta =
     adjustment.type === "discount"
@@ -695,21 +644,15 @@ export const removeAdjustmentFromOrderService = async (
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
 
-  const order = round.orders.find((o: EmbeddedOrder) => o._id.equals(orderId));
-  if (!order) throw new NotFoundError("Order");
-
-  const removed = order.adjustments.find((a: EmbeddedAdjustment) =>
-    a._id.equals(adjustmentId),
-  );
+  const order = findOrder(round, orderId);
+  const removed = order.adjustments.find((a) => a._id.equals(adjustmentId));
   if (!removed) throw new NotFoundError("Adjustment");
 
   order.adjustments = order.adjustments.filter(
-    (a: EmbeddedAdjustment) => !a._id.equals(adjustmentId),
+    (a) => !a._id.equals(adjustmentId),
   );
   recalculateOrderTotals(order);
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  await saveRoundOrders(round);
 
   const delta =
     removed.type === "discount" ? removed.amountCents : -removed.amountCents;
@@ -743,9 +686,7 @@ export const recordPaymentService = async (
   const round = await Round.findById(roundId);
   if (!round) throw new NotFoundError("Round");
 
-  const order = round.orders.find((o: EmbeddedOrder) => o._id.equals(orderId));
-  if (!order) throw new NotFoundError("Order");
-
+  const order = findOrder(round, orderId);
   const payId = new Types.ObjectId();
   const paymentEntry = {
     _id: payId,
@@ -759,9 +700,7 @@ export const recordPaymentService = async (
   order.payments.push(paymentEntry);
   order.paidCents += payment.amountCents;
 
-  round.status = deriveRoundStatus(round.orders, round.closesAt);
-  round.markModified("orders");
-  await round.save();
+  await saveRoundOrders(round);
 
   await recordOrderEvent({
     roundId,
@@ -805,69 +744,16 @@ export const settleRoundFreezeService = async (
     throw new BadRequestError("Cannot settle a round with no participants");
   }
 
-  const participantIds = round.participants.map(
-    (p: EmbeddedParticipant) => p._id,
-  );
-  const inputs: SettlementOrderInput[] = round.orders.map(
-    (order: EmbeddedOrder) => {
-      const activeItems = order.items.filter(
-        (i: EmbeddedOrderItem) => i.status === "active",
-      );
-      return {
-        orderId: order._id,
-        storeName: order.storeSnapshot.name,
-        subtotalCents: order.subtotalCents,
-        adjustments: order.adjustments,
-        participantIds,
-        selections: activeItems.map((i: EmbeddedOrderItem) => ({
-          participantId: i.participantId,
-          unitPriceCents: i.unitPriceCents,
-          quantity: i.quantity,
-        })),
-      };
-    },
-  );
-
-  const settled = settleRound(inputs, participantIds, round.currency);
-
-  const paidByParticipant = new Map<string, number>();
-  for (const order of round.orders) {
-    for (const pay of order.payments || []) {
-      const key = pay.participantId.toString();
-      paidByParticipant.set(
-        key,
-        (paidByParticipant.get(key) ?? 0) + pay.amountCents,
-      );
-    }
+  const calculated = calculateRoundSettlement(round);
+  if (!calculated) {
+    throw new BadRequestError("Cannot settle an empty round");
   }
-
-  const perParticipant: RoundSettlementLine[] = round.participants.map(
-    (p: EmbeddedParticipant) => {
-      const line = settled.perParticipant.get(p._id.toString()) || {
-        itemsCents: 0,
-        adjustmentsCents: 0,
-        totalCents: 0,
-      };
-      const paidCents = paidByParticipant.get(p._id.toString()) ?? 0;
-      return {
-        participantId: p._id,
-        participantName: p.name,
-        orderId: null,
-        orderLabel: "Round Total",
-        itemsCents: line.itemsCents,
-        adjustmentsCents: line.adjustmentsCents,
-        totalCents: line.totalCents,
-        paidCents,
-        outstandingCents: Math.max(0, line.totalCents - paidCents),
-      };
-    },
-  );
 
   round.settlement = {
     frozenAt: new Date(),
     currency: round.currency,
-    orderTotalCents: settled.totalCents,
-    perParticipant,
+    orderTotalCents: calculated.totalCents,
+    perParticipant: calculated.perParticipant,
   };
   round.status = "settled";
   await round.save();
