@@ -1,5 +1,4 @@
-import mongoose, { Schema } from "mongoose";
-import type { Types } from "mongoose";
+import mongoose, { Schema, type Types } from "mongoose";
 
 export const ORDER_EVENT_ACTIONS = [
   "order_created",
@@ -35,35 +34,21 @@ export interface OrderEventDocument {
 export const OrderEventSchema = new Schema<OrderEventDocument>(
   {
     roundId: { type: Schema.Types.ObjectId, ref: "Round", required: true },
-    orderId: { type: Schema.Types.ObjectId, ref: "Order", default: null },
+    orderId: { type: Schema.Types.ObjectId, default: null },
     actorParticipantId: { type: Schema.Types.ObjectId, default: null },
-    actorRole: {
-      type: String,
-      required: true,
-      enum: ["participant", "organizer", "system"],
-      default: "system",
-    },
-    entity: {
-      type: String,
-      required: true,
-      enum: ["order", "selection", "round"],
-    },
-    entityId: { type: String, required: true, maxlength: 200 },
-    action: { type: String, required: true, enum: ORDER_EVENT_ACTIONS },
-    field: { type: String, maxlength: 100, default: null },
-    before: { type: Schema.Types.Mixed, default: null },
-    after: { type: Schema.Types.Mixed, default: null },
-    deltaCents: { type: Number, default: null },
+    actorRole: { type: String, enum: ["participant", "organizer", "system"], default: "system" },
+    entity: { type: String, enum: ["order", "selection", "round"], required: true },
+    entityId: { type: String, required: true },
+    action: { type: String, enum: ORDER_EVENT_ACTIONS, required: true },
+    field: String,
+    before: Schema.Types.Mixed,
+    after: Schema.Types.Mixed,
+    deltaCents: Number,
     changedAt: { type: Date, default: Date.now },
   },
   { collection: "order_events", timestamps: false, versionKey: false },
 );
 
 OrderEventSchema.index({ roundId: 1, changedAt: -1 });
-OrderEventSchema.index({ orderId: 1, changedAt: -1 });
-OrderEventSchema.index({ roundId: 1, action: 1, changedAt: -1 });
-
-export const OrderEvent =
-  mongoose.models.OrderEvent ?? mongoose.model("OrderEvent", OrderEventSchema);
-
+export const OrderEvent = mongoose.models.OrderEvent ?? mongoose.model("OrderEvent", OrderEventSchema);
 export default OrderEvent;

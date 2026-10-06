@@ -1,15 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Types } from "mongoose";
-import { Round } from "../rounds/rounds.model";
-import type { EmbeddedParticipant } from "../rounds/rounds.model";
-
-const TOKEN_BYTES = 24;
+import { Round, type EmbeddedParticipant } from "../rounds/rounds.model";
 
 export const hashToken = (token: string): string =>
   createHash("sha256").update(token).digest("hex");
 
 export const generateToken = (): string =>
-  randomBytes(TOKEN_BYTES).toString("hex");
+  randomBytes(24).toString("hex");
 
 export const joinRoundService = async (
   roundId: Types.ObjectId,
@@ -24,12 +21,7 @@ export const joinRoundService = async (
     tokenHash: hashToken(token),
     joinedAt: new Date(),
   };
-
-  await Round.updateOne(
-    { _id: roundId },
-    { $push: { participants: participant } },
-  );
-
+  await Round.updateOne({ _id: roundId }, { $push: { participants: participant } });
   return { participant, token };
 };
 
@@ -38,13 +30,10 @@ export const resolveParticipantService = async (
   token: string,
 ): Promise<EmbeddedParticipant | null> => {
   if (!token) return null;
-  const digest = hashToken(token);
-
   const round = await Round.findOne(
-    { _id: roundId, "participants.tokenHash": digest },
+    { _id: roundId, "participants.tokenHash": hashToken(token) },
     { "participants.$": 1 },
   ).lean();
-
   return round?.participants?.[0] ?? null;
 };
 
@@ -54,23 +43,9 @@ export const claimParticipantService = async (
   userId: Types.ObjectId,
 ): Promise<EmbeddedParticipant | null> => {
   const round = await Round.findOneAndUpdate(
-    {
-      _id: roundId,
-      "participants._id": participantId,
-      "participants.userId": null,
-    },
-    {
-      $set: {
-        "participants.$.userId": userId,
-        "participants.$.claimedAt": new Date(),
-      },
-    },
+    { _id: roundId, "participants._id": participantId, "participants.userId": null },
+    { $set: { "participants.$.userId": userId, "participants.$.claimedAt": new Date() } },
     { returnDocument: "after" },
   ).lean();
-
-  return (
-    round?.participants?.find((p: EmbeddedParticipant) =>
-      p._id.equals(participantId),
-    ) ?? null
-  );
+  return round?.participants?.find((p: EmbeddedParticipant) => p._id.equals(participantId)) ?? null;
 };

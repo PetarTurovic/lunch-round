@@ -1,5 +1,4 @@
-import mongoose, { Schema } from "mongoose";
-import type { Types } from "mongoose";
+import mongoose, { Schema, type Types } from "mongoose";
 
 export interface ParticipantDocument {
   _id: Types.ObjectId;
@@ -18,36 +17,14 @@ export const ParticipantSchema = new Schema<ParticipantDocument>(
   {
     roundId: { type: Schema.Types.ObjectId, ref: "Round", required: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
-    name: { type: String, required: true, maxlength: 100, trim: true },
-    email: {
-      type: String,
-      maxlength: 254,
-      lowercase: true,
-      trim: true,
-      default: null,
-    },
-    tokenHash: { type: String, required: true, maxlength: 64 },
+    name: { type: String, required: true, trim: true },
+    email: { type: String, lowercase: true, trim: true, default: null },
+    tokenHash: { type: String, required: true },
     claimedAt: { type: Date, default: null },
     joinedAt: { type: Date, default: Date.now },
   },
   { collection: "participants", timestamps: true, versionKey: false },
 );
 
-ParticipantSchema.index({ roundId: 1, joinedAt: 1 });
-
-ParticipantSchema.index(
-  { roundId: 1, userId: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { userId: { $type: "objectId" } },
-  },
-);
-
-ParticipantSchema.index({ tokenHash: 1 }, { unique: true });
-ParticipantSchema.index({ userId: 1, joinedAt: -1 });
-
-export const Participant =
-  mongoose.models.Participant ??
-  mongoose.model("Participant", ParticipantSchema);
-
+export const Participant = mongoose.models.Participant ?? mongoose.model("Participant", ParticipantSchema);
 export default Participant;

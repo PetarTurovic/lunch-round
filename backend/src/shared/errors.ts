@@ -1,39 +1,12 @@
 export class AppError extends Error {
-  public readonly statusCode: number;
-
-  constructor(message: string, statusCode = 500) {
+  constructor(message: string, public readonly statusCode = 500) {
     super(message);
-    this.statusCode = statusCode;
-    Object.setPrototypeOf(this, AppError.prototype);
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
-export class NotFoundError extends AppError {
-  constructor(resource = "Resource") {
-    super(`${resource} not found`, 404);
-  }
-}
-
-export class UnauthorizedError extends AppError {
-  constructor(message = "Unauthorized") {
-    super(message, 401);
-  }
-}
-
-export class ForbiddenError extends AppError {
-  constructor(message = "Forbidden") {
-    super(message, 403);
-  }
-}
-
-export class BadRequestError extends AppError {
-  constructor(message = "Bad request") {
-    super(message, 400);
-  }
-}
-
-export class ConflictError extends AppError {
-  constructor(message = "Conflict") {
-    super(message, 409);
-  }
-}
+export class NotFoundError extends AppError { constructor(res = "Resource") { super(`${res} not found`, 404); } }
+export class UnauthorizedError extends AppError { constructor(msg = "Unauthorized") { super(msg, 401); } }
+export class ForbiddenError extends AppError { constructor(msg = "Forbidden") { super(msg, 403); } }
+export class BadRequestError extends AppError { constructor(msg = "Bad request") { super(msg, 400); } }
+export class ConflictError extends AppError { constructor(msg = "Conflict") { super(msg, 409); } }

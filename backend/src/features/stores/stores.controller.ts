@@ -20,43 +20,22 @@ const storeListQuery = z.object({
   radius: z.coerce.number().positive().optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
-  sortBy: z
-    .enum(["name", "createdAt", "updatedAt", "rating", "itemCount"])
-    .optional(),
+  sortBy: z.enum(["name", "createdAt", "updatedAt", "rating", "itemCount"]).optional(),
   sortOrder: z.enum(["asc", "desc"]).optional(),
 });
 
 export const getStoresController = async (req: Request, res: Response) => {
   const { radius, ...filters } = storeListQuery.parse(req.query);
-  const result = await getStoresService({ ...filters, radiusKm: radius });
-  res.json(result);
+  res.json(await getStoresService({ ...filters, radiusKm: radius }));
 };
 
 export const getStoreController = async (req: Request, res: Response) => {
-  const idOrSlug = z.string().parse(req.params.idOrSlug);
-  const store = await getStoreByIdOrSlugService(idOrSlug);
-  res.json({ store });
+  res.json({ store: await getStoreByIdOrSlugService(z.string().parse(req.params.idOrSlug)) });
 };
 
-export const getStoreMenuController = async (req: Request, res: Response) => {
-  const idOrSlug = z.string().parse(req.params.idOrSlug);
-  const store = await getStoreByIdOrSlugService(idOrSlug);
-  res.json({ store });
-};
+export const getStoreMenuController = getStoreController;
 
-export const getStoreMenuSummaryController = async (
-  req: Request,
-  res: Response,
-) => {
-  const items = z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(10)
-    .default(3)
-    .parse(req.query.items);
-  const idOrSlug = z.string().parse(req.params.idOrSlug);
-  const store = await getStoreMenuSummaryService(idOrSlug, items);
-
-  res.json({ store });
+export const getStoreMenuSummaryController = async (req: Request, res: Response) => {
+  const items = z.coerce.number().int().min(1).max(10).default(3).parse(req.query.items);
+  res.json({ store: await getStoreMenuSummaryService(z.string().parse(req.params.idOrSlug), items) });
 };

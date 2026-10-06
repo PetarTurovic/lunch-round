@@ -15,25 +15,16 @@ export interface PlatformDocument {
 
 export const PlatformSchema = new Schema<PlatformDocument>(
   {
-    _id: { type: String, required: true, maxlength: 50 },
-    name: { type: String, required: true, maxlength: 100 },
-    ratingScale: {
-      type: String,
-      required: true,
-      enum: ["percent", "five_star"],
-    },
-    ratingMax: { type: Number, required: true, min: 1, default: 5 },
-    currency: { type: String, required: true, maxlength: 3, default: "EUR" },
-    country: { type: String, required: true, maxlength: 2 },
-    baseUrl: { type: String, maxlength: 500 },
+    _id: { type: String, required: true },
+    name: { type: String, required: true },
+    ratingScale: { type: String, required: true, enum: ["percent", "five_star"] },
+    ratingMax: { type: Number, default: 5 },
+    currency: { type: String, default: "EUR" },
+    country: { type: String, required: true },
+    baseUrl: String,
     enabled: { type: Boolean, default: true },
   },
-  {
-    collection: "platforms",
-    timestamps: true,
-    versionKey: false,
-  },
+  { collection: "platforms", timestamps: true, versionKey: false },
 );
 
-export const Platform =
-  mongoose.models.Platform ?? mongoose.model("Platform", PlatformSchema);
+export const Platform = mongoose.models.Platform ?? mongoose.model("Platform", PlatformSchema);

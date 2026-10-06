@@ -1,132 +1,37 @@
 import { Router } from "express";
-import {
-  createRoundController,
-  getRoundsController,
-  getRoundController,
-  updateRoundController,
-  deleteRoundController,
-  joinRoundController,
-  getMyParticipantController,
-  addSelectionController,
-  updateSelectionController,
-  removeSelectionController,
-  overridePriceController,
-  addAdjustmentController,
-  removeAdjustmentController,
-  recordPaymentController,
-  lockRoundController,
-  settleRoundController,
-  getTimelineController,
-} from "./rounds.controller";
+import * as c from "./rounds.controller";
 import {
   requireAuth,
   optionalAuth,
-  resolveRoundMiddleware,
-  resolveParticipantMiddleware,
-  requireParticipant,
-  requireOrganizer,
+  resolveRoundMiddleware as rMid,
+  resolveParticipantMiddleware as pMid,
+  requireParticipant as reqPart,
+  requireOrganizer as reqOrg,
 } from "../users/auth.middleware";
 
 const router = Router();
 
-// Round list & creation (requires logged-in user)
-router.get("/", requireAuth, getRoundsController);
-router.post("/", requireAuth, createRoundController);
+router.get("/", requireAuth, c.getRoundsController);
+router.post("/", requireAuth, c.createRoundController);
 
-// Single round details
-router.get("/:idOrSlug", getRoundController);
-router.patch(
-  "/:idOrSlug",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  updateRoundController,
-);
-router.delete(
-  "/:idOrSlug",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  deleteRoundController,
-);
+router.get("/:idOrSlug", c.getRoundController);
+router.patch("/:idOrSlug", rMid, reqOrg, c.updateRoundController);
+router.delete("/:idOrSlug", rMid, reqOrg, c.deleteRoundController);
 
-// Participant operations
-router.post(
-  "/:idOrSlug/join",
-  resolveRoundMiddleware,
-  optionalAuth,
-  joinRoundController,
-);
-router.get(
-  "/:idOrSlug/me",
-  resolveRoundMiddleware,
-  resolveParticipantMiddleware,
-  getMyParticipantController,
-);
+router.post("/:idOrSlug/join", rMid, optionalAuth, c.joinRoundController);
+router.get("/:idOrSlug/me", rMid, pMid, c.getMyParticipantController);
 
-// Selection operations
-router.post(
-  "/:idOrSlug/selections",
-  resolveRoundMiddleware,
-  requireParticipant,
-  addSelectionController,
-);
-router.patch(
-  "/:idOrSlug/selections/:selectionId",
-  resolveRoundMiddleware,
-  requireParticipant,
-  updateSelectionController,
-);
-router.delete(
-  "/:idOrSlug/selections/:selectionId",
-  resolveRoundMiddleware,
-  requireParticipant,
-  removeSelectionController,
-);
-router.post(
-  "/:idOrSlug/selections/:selectionId/price",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  overridePriceController,
-);
+router.post("/:idOrSlug/selections", rMid, reqPart, c.addSelectionController);
+router.patch("/:idOrSlug/selections/:selectionId", rMid, reqPart, c.updateSelectionController);
+router.delete("/:idOrSlug/selections/:selectionId", rMid, reqPart, c.removeSelectionController);
+router.post("/:idOrSlug/selections/:selectionId/price", rMid, reqOrg, c.overridePriceController);
 
-// Adjustments & Payments (organizer)
-router.post(
-  "/:idOrSlug/orders/:orderId/adjustments",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  addAdjustmentController,
-);
-router.delete(
-  "/:idOrSlug/orders/:orderId/adjustments/:adjustmentId",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  removeAdjustmentController,
-);
-router.post(
-  "/:idOrSlug/orders/:orderId/payments",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  recordPaymentController,
-);
+router.post("/:idOrSlug/orders/:orderId/adjustments", rMid, reqOrg, c.addAdjustmentController);
+router.delete("/:idOrSlug/orders/:orderId/adjustments/:adjustmentId", rMid, reqOrg, c.removeAdjustmentController);
+router.post("/:idOrSlug/orders/:orderId/payments", rMid, reqOrg, c.recordPaymentController);
 
-// Round lifecycle actions
-router.post(
-  "/:idOrSlug/lock",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  lockRoundController,
-);
-router.post(
-  "/:idOrSlug/settle",
-  resolveRoundMiddleware,
-  requireOrganizer,
-  settleRoundController,
-);
-
-// Money timeline / audit trail
-router.get(
-  "/:idOrSlug/timeline",
-  resolveRoundMiddleware,
-  getTimelineController,
-);
+router.post("/:idOrSlug/lock", rMid, reqOrg, c.lockRoundController);
+router.post("/:idOrSlug/settle", rMid, reqOrg, c.settleRoundController);
+router.get("/:idOrSlug/timeline", rMid, c.getTimelineController);
 
 export default router;

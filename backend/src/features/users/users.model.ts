@@ -11,22 +11,12 @@ export interface UserDocument {
 
 export const UserSchema = new Schema<UserDocument>(
   {
-    email: {
-      type: String,
-      required: true,
-      maxlength: 254,
-      lowercase: true,
-      trim: true,
-      unique: true,
-    },
-    name: { type: String, required: true, maxlength: 100, trim: true },
-    passwordHash: { type: String, maxlength: 200, default: null },
+    email: { type: String, required: true, lowercase: true, trim: true, unique: true },
+    name: { type: String, required: true, trim: true },
+    passwordHash: { type: String, default: null },
   },
   { collection: "users", timestamps: true, versionKey: false },
 );
 
-UserSchema.index({ createdAt: -1 });
-
 export const User = mongoose.models.User ?? mongoose.model("User", UserSchema);
-
 export default User;
