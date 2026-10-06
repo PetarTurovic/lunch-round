@@ -1,7 +1,6 @@
 import type { Types } from "mongoose";
 import { OrderEvent } from "./order-events.model";
 import type { OrderEventAction } from "./order-events.model";
-import { Selection } from "../selections/selections.model";
 
 export interface RecordEventInput {
   roundId: Types.ObjectId;
@@ -32,40 +31,6 @@ export const recordOrderEvent = async (input: RecordEventInput) => {
     deltaCents: input.deltaCents ?? null,
     changedAt: new Date(),
   });
-};
-
-export const overrideSelectionPriceService = async (
-  selectionId: Types.ObjectId,
-  actorParticipantId: Types.ObjectId,
-  newUnitPriceCents: number,
-) => {
-  const selection = await Selection.findById(selectionId);
-  if (!selection) return null;
-
-  const previous = selection.unitPriceCents;
-  if (previous === newUnitPriceCents) return previous;
-
-  const restoringMenuPrice = newUnitPriceCents === selection.menuUnitPriceCents;
-
-  selection.unitPriceCents = newUnitPriceCents;
-  selection.priceOverridden = !restoringMenuPrice;
-  await selection.save();
-
-  await recordOrderEvent({
-    roundId: selection.roundId,
-    orderId: selection.orderId,
-    actorParticipantId,
-    actorRole: "organizer",
-    entity: "selection",
-    entityId: selection.itemId,
-    action: restoringMenuPrice ? "price_restored" : "price_overridden",
-    field: "unitPriceCents",
-    before: previous,
-    after: newUnitPriceCents,
-    deltaCents: (newUnitPriceCents - previous) * selection.quantity,
-  });
-
-  return newUnitPriceCents;
 };
 
 export const getRoundMoneyTimelineService = async (roundId: Types.ObjectId) => {

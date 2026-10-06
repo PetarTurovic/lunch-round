@@ -41,31 +41,7 @@ export const getStoreController = async (req: Request, res: Response) => {
 export const getStoreMenuController = async (req: Request, res: Response) => {
   const idOrSlug = z.string().parse(req.params.idOrSlug);
   const store = await getStoreByIdOrSlugService(idOrSlug);
-
-  const {
-    _id,
-    slug,
-    name,
-    platform,
-    currency,
-    location,
-    delivery,
-    stats,
-    menu,
-  } = store;
-  res.json({
-    store: {
-      _id,
-      slug,
-      name,
-      platform,
-      currency,
-      location,
-      delivery,
-      stats,
-      menu,
-    },
-  });
+  res.json({ store });
 };
 
 export const getStoreMenuSummaryController = async (
