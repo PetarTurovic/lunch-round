@@ -66,6 +66,11 @@ export const createRound = async (req: Request, res: Response) => {
   const body = z.object({
     title: z.string().min(1).max(120),
     venue: z.string().max(120).optional(),
+    location: z.object({
+      lat: z.number(),
+      lon: z.number(),
+      radiusKm: z.number().min(0.1).max(100).optional(),
+    }).optional(),
     organizerName: z.string().min(1).max(100).optional(),
     closesAt: z.coerce.date().optional(),
     feeCents: z.number().int().min(0).optional(),
@@ -91,6 +96,7 @@ export const createRound = async (req: Request, res: Response) => {
     slug: randomBytes(4).toString("hex"),
     title: body.title.trim(),
     venue: body.venue?.trim() || "Lunch Venue",
+    location: body.location ? { ...body.location, radiusKm: body.location.radiusKm || 10 } : null,
     organizer: { participantId: organizerParticipantId, name: organizerName, userId },
     items: body.items || [],
     orders: [organizerOrder],
@@ -115,12 +121,20 @@ export const updateRound = async (req: Request, res: Response) => {
   const body = z.object({
     title: z.string().min(1).max(120).optional(),
     venue: z.string().max(120).optional(),
+    location: z.object({
+      lat: z.number(),
+      lon: z.number(),
+      radiusKm: z.number().min(0.1).max(100).optional(),
+    }).nullable().optional(),
     feeCents: z.number().int().min(0).optional(),
     closesAt: z.coerce.date().nullable().optional(),
   }).parse(req.body);
 
   if (body.title !== undefined) round.title = body.title.trim();
   if (body.venue !== undefined) round.venue = body.venue.trim();
+  if (body.location !== undefined) {
+    round.location = body.location ? { ...body.location, radiusKm: body.location.radiusKm || 10 } : null;
+  }
   if (body.feeCents !== undefined) round.feeCents = body.feeCents;
   if (body.closesAt !== undefined) round.closesAt = body.closesAt;
   await round.save();

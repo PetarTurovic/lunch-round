@@ -75,8 +75,42 @@ export const me = async (req: Request, res: Response) => {
       id: user._id.toString(),
       email: user.email,
       name: user.name,
+      location: user.location ?? null,
       createdAt: user.createdAt,
       stats: { organizedRounds, joinedRounds },
+    },
+  });
+};
+
+export const updateMe = async (req: Request, res: Response) => {
+  const userId = new Types.ObjectId(req.user!.id);
+  const body = z.object({
+    name: z.string().min(1).max(100).optional(),
+    location: z.object({
+      lat: z.number(),
+      lon: z.number(),
+      radiusKm: z.number().min(0.1).max(100).optional(),
+    }).nullable().optional(),
+  }).parse(req.body);
+
+  const user = await User.findById(userId);
+  if (!user) throw new NotFoundError("User");
+
+  if (body.name !== undefined) user.name = body.name.trim();
+  if (body.location !== undefined) {
+    user.location = body.location
+      ? { ...body.location, radiusKm: body.location.radiusKm || 10 }
+      : null;
+  }
+  await user.save();
+
+  res.json({
+    user: {
+      id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      location: user.location ?? null,
+      createdAt: user.createdAt,
     },
   });
 };

@@ -36,6 +36,7 @@ export interface RoundDocument {
   slug: string;
   title: string;
   venue: string;
+  location?: { lat: number; lon: number; radiusKm?: number } | null;
   organizer: {
     participantId: Types.ObjectId;
     name: string;
@@ -56,6 +57,7 @@ export const RoundSchema = new Schema<RoundDocument>(
     slug: { type: String, required: true, unique: true },
     title: { type: String, required: true, trim: true },
     venue: { type: String, required: true, default: "Lunch Venue" },
+    location: { type: Schema.Types.Mixed, default: null },
     organizer: {
       participantId: { type: Schema.Types.ObjectId, required: true },
       name: { type: String, required: true },
