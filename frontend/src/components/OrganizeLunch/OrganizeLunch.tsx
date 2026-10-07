@@ -90,7 +90,7 @@ function OrganizeLunch({
               <div className="mt-4 grid gap-2">
                 {(round.shortlist || []).map((store) => (
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-stone-100 px-3 py-2.5" key={store._id}>
-                    <div><strong className="block text-[10px]">{store.name}</strong><small className="text-[8px] text-stone-500">{[store.platform, store.currency].filter(Boolean).join(" · ")}</small></div>
+                    <div><strong className="block text-[10px]">{store.name}</strong></div>
                     {store.rating != null && <span className="text-[9px] text-amber-700">★ {Number(typeof store.rating === "object" ? store.rating.value : store.rating).toFixed(1)}</span>}
                   </div>
                 ))}
