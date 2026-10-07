@@ -1,31 +1,23 @@
 import { Router } from "express";
-import * as c from "./rounds.controller";
-import {
-  requireAuth,
-  optionalAuth,
-  resolveRoundMiddleware as rMid,
-  resolveParticipantMiddleware as pMid,
-  requireParticipant as reqPart,
-  requireOrganizer as reqOrg,
-} from "../users/auth.middleware";
+import * as roundCtrl from "./rounds.controller";
+import { requireAuth, optionalAuth, resolveRound } from "../../auth.middleware";
 
-const router = Router();
+export const roundsRouter = Router();
 
-router.get("/", requireAuth, c.getRoundsController);
-router.post("/", requireAuth, c.createRoundController);
+roundsRouter.get("/", requireAuth, roundCtrl.getRounds);
+roundsRouter.post("/", requireAuth, roundCtrl.createRound);
 
-router.get("/:idOrSlug", c.getRoundController);
-router.patch("/:idOrSlug", rMid, reqOrg, c.updateRoundController);
-router.delete("/:idOrSlug", rMid, reqOrg, c.deleteRoundController);
+roundsRouter.get("/:idOrSlug", resolveRound(), roundCtrl.getRound);
+roundsRouter.patch("/:idOrSlug", resolveRound({ requireOrganizer: true }), roundCtrl.updateRound);
+roundsRouter.delete("/:idOrSlug", resolveRound({ requireOrganizer: true }), roundCtrl.deleteRound);
 
-router.post("/:idOrSlug/join", rMid, optionalAuth, c.joinRoundController);
-router.get("/:idOrSlug/me", rMid, pMid, c.getMyParticipantController);
+roundsRouter.post("/:idOrSlug/join", resolveRound(), optionalAuth, roundCtrl.joinRound);
+roundsRouter.get("/:idOrSlug/me", resolveRound(), roundCtrl.getMyParticipant);
 
-// Simplified item & order operations matching frontend
-router.put("/:idOrSlug/items", rMid, reqOrg, c.updateRoundItemsController);
-router.post("/:idOrSlug/order", rMid, reqPart, c.saveOrderController);
+roundsRouter.put("/:idOrSlug/items", resolveRound({ requireOrganizer: true }), roundCtrl.updateRoundItems);
+roundsRouter.post("/:idOrSlug/order", resolveRound({ requireParticipant: true }), roundCtrl.saveOrder);
 
-router.post("/:idOrSlug/lock", rMid, reqOrg, c.lockRoundController);
-router.post("/:idOrSlug/settle", rMid, reqOrg, c.settleRoundController);
+roundsRouter.post("/:idOrSlug/lock", resolveRound({ requireOrganizer: true }), roundCtrl.lockRound);
+roundsRouter.post("/:idOrSlug/settle", resolveRound({ requireOrganizer: true }), roundCtrl.settleRound);
 
-export default router;
+export default roundsRouter;

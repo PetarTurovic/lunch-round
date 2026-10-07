@@ -1,7 +1,8 @@
-import mongoose, { Schema, type Types } from "mongoose";
+import mongoose, { Schema, Types } from "mongoose";
+import { createHash, randomBytes } from "node:crypto";
 
-export const ROUND_STATUSES = ["open", "locked", "settled"] as const;
-export type RoundStatus = (typeof ROUND_STATUSES)[number];
+export const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
+export const generateToken = (): string => randomBytes(24).toString("hex");
 
 export interface RoundItem {
   id: string;
@@ -20,15 +21,10 @@ export interface RoundOrder {
   updatedAt: Date;
 }
 
-export interface RoundBillPerson {
-  name: string;
-  amountCents: number;
-}
-
 export interface RoundBill {
   settledAt: Date;
   totalCents: number;
-  people: RoundBillPerson[];
+  people: { name: string; amountCents: number }[];
 }
 
 export interface RoundDocument {
@@ -41,7 +37,7 @@ export interface RoundDocument {
     name: string;
     userId: Types.ObjectId;
   };
-  status: RoundStatus;
+  status: "open" | "locked" | "settled";
   closesAt?: Date | null;
   items: RoundItem[];
   orders: RoundOrder[];
@@ -50,29 +46,6 @@ export interface RoundDocument {
   createdAt: Date;
   updatedAt: Date;
 }
-
-const RoundItemSchema = new Schema(
-  {
-    id: { type: String, required: true },
-    name: { type: String, required: true },
-    description: String,
-    priceCents: { type: Number, required: true, default: 0 },
-  },
-  { _id: false },
-);
-
-const RoundOrderSchema = new Schema(
-  {
-    participantId: { type: Schema.Types.ObjectId, required: true },
-    name: { type: String, required: true, trim: true },
-    userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
-    tokenHash: { type: String, required: true },
-    joinedAt: { type: Date, default: Date.now },
-    quantities: { type: Map, of: Number, default: {} },
-    updatedAt: { type: Date, default: Date.now },
-  },
-  { _id: false },
-);
 
 export const RoundSchema = new Schema<RoundDocument>(
   {
@@ -84,10 +57,33 @@ export const RoundSchema = new Schema<RoundDocument>(
       name: { type: String, required: true },
       userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     },
-    status: { type: String, enum: ROUND_STATUSES, default: "open" },
+    status: { type: String, enum: ["open", "locked", "settled"], default: "open" },
     closesAt: { type: Date, default: null },
-    items: { type: [RoundItemSchema], default: [] },
-    orders: { type: [RoundOrderSchema], default: [] },
+    items: {
+      type: [
+        {
+          id: { type: String, required: true },
+          name: { type: String, required: true },
+          description: String,
+          priceCents: { type: Number, required: true, default: 0 },
+        },
+      ],
+      default: [],
+    },
+    orders: {
+      type: [
+        {
+          participantId: { type: Schema.Types.ObjectId, required: true },
+          name: { type: String, required: true, trim: true },
+          userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+          tokenHash: { type: String, required: true },
+          joinedAt: { type: Date, default: Date.now },
+          quantities: { type: Schema.Types.Mixed, default: {} },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     feeCents: { type: Number, default: 0 },
     bill: { type: Schema.Types.Mixed, default: null },
   },
@@ -97,7 +93,6 @@ export const RoundSchema = new Schema<RoundDocument>(
 RoundSchema.index({ "organizer.userId": 1, createdAt: -1 });
 RoundSchema.index({ "orders.userId": 1, createdAt: -1 });
 RoundSchema.index({ "orders.tokenHash": 1 });
-RoundSchema.index({ status: 1, closesAt: 1 });
 
-export const Round = mongoose.models.Round ?? mongoose.model("Round", RoundSchema);
+export const Round = mongoose.models.Round ?? mongoose.model<RoundDocument>("Round", RoundSchema);
 export default Round;
