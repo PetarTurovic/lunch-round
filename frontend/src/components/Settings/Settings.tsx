@@ -1,6 +1,11 @@
-import React from "react";
+import type { Theme } from "../../types";
 
-function Settings({ theme, onThemeChange }) {
+interface SettingsProps {
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
+}
+
+function Settings({ theme, onThemeChange }: SettingsProps) {
   return (
     <section className="mx-auto max-w-6xl pt-9">
       <div className="mb-7">
@@ -23,7 +28,7 @@ function Settings({ theme, onThemeChange }) {
             <p className="mb-0 text-[10px] text-stone-500">Choose the look that works best for you.</p>
           </div>
           <div className="flex rounded-lg border border-stone-200 bg-stone-50 p-1" aria-label="Color theme">
-            {["light", "dark"].map((option) => (
+            {(["light", "dark"] as const).map((option) => (
               <button
                 className={`min-h-8 rounded-md px-3 text-[10px] font-semibold transition ${theme === option ? "bg-white text-lunch-dark shadow-sm" : "text-stone-500 hover:text-stone-800"}`}
                 key={option}

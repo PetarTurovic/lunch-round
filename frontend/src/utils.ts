@@ -1,18 +1,40 @@
 export const STORAGE_KEY = "lunchround-demo-v1";
 
-export const initials = (name) => name.trim().charAt(0).toUpperCase() || "?";
+export const initials = (name: string): string => name.trim().charAt(0).toUpperCase() || "?";
 
-export const safeNumber = (value) => {
+export const safeNumber = (value: number | string | null | undefined): number => {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
 };
 
-export const euro = (value) => new Intl.NumberFormat("en-IE", {
+export const euro = (value: number, currency = "EUR"): string => new Intl.NumberFormat("en-IE", {
   style: "currency",
-  currency: "EUR"
+  currency
 }).format(value);
 
-export function makeDefaultState() {
+interface DemoItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+}
+
+interface DemoOrder {
+  name: string;
+  quantities: Record<string, number>;
+}
+
+interface DemoState {
+  venue: string;
+  lockAt: string;
+  locked: boolean;
+  fees: number;
+  history: unknown[];
+  items: DemoItem[];
+  orders: DemoOrder[];
+}
+
+export function makeDefaultState(): DemoState {
   const lockAt = new Date(Date.now() + 42 * 60_000);
   const offset = lockAt.getTimezoneOffset() * 60_000;
   return {
@@ -35,45 +57,47 @@ export function makeDefaultState() {
   };
 }
 
-export function readSavedState() {
+export function readSavedState(): DemoState {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return makeDefaultState();
-    const parsed = JSON.parse(saved);
-    if (!parsed || !Array.isArray(parsed.items) || !Array.isArray(parsed.orders)) {
+    const parsed: unknown = JSON.parse(saved);
+    if (!parsed || typeof parsed !== "object") throw new Error("Saved lunch data is incomplete.");
+    const state = parsed as Partial<DemoState>;
+    if (!Array.isArray(state.items) || !Array.isArray(state.orders)) {
       throw new Error("Saved lunch data is incomplete.");
     }
-    return { ...parsed, history: Array.isArray(parsed.history) ? parsed.history : [] };
+    return { ...state, history: Array.isArray(state.history) ? state.history : [] } as DemoState;
   } catch (error) {
     console.error("Could not load the saved LunchRound demo state.", error);
     return makeDefaultState();
   }
 }
 
-export function itemTotal(order, items) {
+export function itemTotal(order: DemoOrder, items: DemoItem[]): number {
   return items.reduce((total, item) => total + safeNumber(order.quantities[item.id]) * safeNumber(item.price), 0);
 }
 
-export function orderQuantity(order, items) {
+export function orderQuantity(order: DemoOrder, items: DemoItem[]): number {
   return items.reduce((total, item) => total + safeNumber(order.quantities[item.id]), 0);
 }
 
-export function orderDescription(order, items) {
+export function orderDescription(order: DemoOrder, items: DemoItem[]): string {
   const picks = items
     .filter((item) => safeNumber(order.quantities[item.id]) > 0)
     .map((item) => `${safeNumber(order.quantities[item.id])} ${item.name}`);
   return picks.length ? picks.join(", ") : "No dishes selected";
 }
 
-export function itemQuantities(items, orders) {
-  const totals = new Map(items.map((item) => [item.id, 0]));
+export function itemQuantities(items: DemoItem[], orders: DemoOrder[]): Map<string, number> {
+  const totals = new Map<string, number>(items.map((item) => [item.id, 0]));
   orders.forEach((order) => items.forEach((item) => {
-    totals.set(item.id, totals.get(item.id) + safeNumber(order.quantities[item.id]));
+    totals.set(item.id, (totals.get(item.id) ?? 0) + safeNumber(order.quantities[item.id]));
   }));
   return totals;
 }
 
-export function allocateCents(amount, weights) {
+export function allocateCents(amount: number, weights: Map<string, number>): Map<string, number> {
   const entries = [...weights.entries()];
   const weightTotal = entries.reduce((sum, [, weight]) => sum + weight, 0);
   if (weightTotal <= 0 || amount <= 0) return new Map(entries.map(([key]) => [key, 0]));
