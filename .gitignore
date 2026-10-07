@@ -1,0 +1,6 @@
+README.md
+
+# Node.js and Vite
+node_modules/
+frontend/dist/
+npm-debug.log*

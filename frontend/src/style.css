@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #252720;
+  --color-canvas: #f7f7f3;
+  --color-lunch: #427451;
+  --color-lunch-dark: #315e40;
+  --color-lunch-soft: #eef5ee;
+  --color-lunch-orange: #e58b55;
+  --font-sans: "DM Sans", sans-serif;
+  --font-display: "Manrope", sans-serif;
+}
+
+html {
+  min-width: 320px;
+}
+
+html.dark {
+  color-scheme: dark;
+  --color-ink: #f1f2ed;
+  --color-canvas: #151815;
+  --color-white: #1e231f;
+  --color-stone-50: #202521;
+  --color-stone-100: #2a302b;
+  --color-stone-200: #38413a;
+  --color-stone-300: #4b574e;
+  --color-stone-400: #8c998f;
+  --color-stone-500: #aab5ac;
+  --color-stone-600: #c0c9c1;
+  --color-stone-700: #d5dbd6;
+  --color-stone-800: #e3e8e3;
+  --color-stone-900: #f1f2ed;
+  --color-lunch: #88bd91;
+  --color-lunch-dark: #a4d0aa;
+  --color-lunch-soft: #27382b;
+  --color-lunch-orange: #f0a46f;
+  --color-green-50: #1e2d22;
+  --color-green-100: #26392b;
+  --color-green-200: #38543e;
+  --color-green-500: #71b77e;
+  --color-green-700: #a2d3a9;
+  --color-green-800: #b9dfbe;
+  --color-green-900: #d4ebd6;
+  --color-orange-50: #33271e;
+  --color-orange-100: #443324;
+  --color-orange-800: #edbb92;
+  --color-purple-50: #2d2639;
+  --color-purple-100: #382f49;
+  --color-purple-800: #d0b8f1;
+  --color-blue-100: #253547;
+  --color-blue-800: #a9d0f1;
+  --color-amber-700: #f0c876;
+}
