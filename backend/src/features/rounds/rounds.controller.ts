@@ -111,5 +111,5 @@ export const lockRoundController = async (req: Request, res: Response) => {
 };
 
 export const settleRoundController = async (req: Request, res: Response) => {
-  res.json({ round: await roundSvc.settleRoundService(req.round!) });
+  res.json({ round: await roundSvc.settleRoundService(req.round!, req.body) });
 };

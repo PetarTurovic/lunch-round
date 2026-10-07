@@ -20,17 +20,15 @@ export interface RoundOrder {
   updatedAt: Date;
 }
 
-export interface RoundSettlementPerson {
+export interface RoundBillPerson {
   name: string;
-  foodCents: number;
-  feeCents: number;
-  totalCents: number;
+  amountCents: number;
 }
 
-export interface RoundSettlement {
+export interface RoundBill {
   settledAt: Date;
   totalCents: number;
-  people: RoundSettlementPerson[];
+  people: RoundBillPerson[];
 }
 
 export interface RoundDocument {
@@ -48,7 +46,7 @@ export interface RoundDocument {
   items: RoundItem[];
   orders: RoundOrder[];
   feeCents: number;
-  settlement?: RoundSettlement | null;
+  bill?: RoundBill | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,7 +89,7 @@ export const RoundSchema = new Schema<RoundDocument>(
     items: { type: [RoundItemSchema], default: [] },
     orders: { type: [RoundOrderSchema], default: [] },
     feeCents: { type: Number, default: 0 },
-    settlement: { type: Schema.Types.Mixed, default: null },
+    bill: { type: Schema.Types.Mixed, default: null },
   },
   { collection: "rounds", timestamps: true, versionKey: false },
 );

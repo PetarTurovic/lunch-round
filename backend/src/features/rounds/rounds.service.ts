@@ -5,7 +5,7 @@ import {
   type RoundDocument,
   type RoundItem,
   type RoundOrder,
-  type RoundSettlement,
+  type RoundBill,
 } from "./rounds.model";
 import { hashToken, generateToken } from "../participants/participants.service";
 import { BadRequestError, NotFoundError } from "../../shared/errors";
@@ -19,10 +19,10 @@ const resolveRound = async (
   return round;
 };
 
-export const calculateRoundSettlement = (round: RoundDocument): RoundSettlement => {
+export const calculateRoundBill = (round: RoundDocument): RoundBill => {
   const priceMap = new Map(round.items.map((item) => [item.id, Number(item.priceCents || 0)]));
 
-  const people = round.orders.map((order) => {
+  const peopleFood = round.orders.map((order) => {
     const quantities =
       order.quantities instanceof Map
         ? Object.fromEntries(order.quantities.entries())
@@ -33,23 +33,19 @@ export const calculateRoundSettlement = (round: RoundDocument): RoundSettlement 
       0,
     );
 
-    return {
-      name: order.name,
-      foodCents,
-      feeCents: 0,
-      totalCents: foodCents,
-    };
+    return { name: order.name, foodCents };
   });
 
-  const totalFoodCents = people.reduce((sum, p) => sum + p.foodCents, 0);
+  const totalFoodCents = peopleFood.reduce((sum, p) => sum + p.foodCents, 0);
   const feeCents = Number(round.feeCents || 0);
 
-  if (totalFoodCents > 0 && feeCents > 0) {
-    people.forEach((p) => {
-      p.feeCents = Math.round((feeCents * p.foodCents) / totalFoodCents);
-      p.totalCents = p.foodCents + p.feeCents;
-    });
-  }
+  const people = peopleFood.map((p) => {
+    const feeShare = totalFoodCents > 0 ? Math.round((feeCents * p.foodCents) / totalFoodCents) : 0;
+    return {
+      name: p.name,
+      amountCents: p.foodCents + feeShare,
+    };
+  });
 
   return {
     settledAt: new Date(),
@@ -115,10 +111,10 @@ export const getRoundByIdOrSlugService = async (idOrSlug: string) => {
   const round = await Round.findOne(query).lean();
   if (!round) throw new NotFoundError("Round");
 
-  const settlement = round.settlement || calculateRoundSettlement(round as any);
+  const bill = round.bill || calculateRoundBill(round as any);
   return {
     ...round,
-    settlementView: settlement,
+    bill,
   };
 };
 
@@ -177,10 +173,17 @@ export const lockRoundService = async (roundOrId: HydratedDocument<RoundDocument
   return round;
 };
 
-export const settleRoundService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId) => {
+export const settleRoundService = async (
+  roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId,
+  updates?: { feeCents?: number; items?: RoundItem[] },
+) => {
   const round = await resolveRound(roundOrId);
   if (!round.orders.length) throw new BadRequestError("Cannot settle an empty round");
-  round.settlement = calculateRoundSettlement(round as any);
+
+  if (typeof updates?.feeCents === "number") round.feeCents = updates.feeCents;
+  if (Array.isArray(updates?.items)) round.items = updates.items;
+
+  round.bill = calculateRoundBill(round as any);
   round.status = "settled";
   await round.save();
   return round;
