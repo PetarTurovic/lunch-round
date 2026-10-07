@@ -1,7 +1,7 @@
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, Types } from "mongoose";
 
 export interface UserDocument {
-  _id: mongoose.Types.ObjectId;
+  _id: Types.ObjectId;
   email: string;
   name: string;
   passwordHash?: string | null;
@@ -18,5 +18,5 @@ export const UserSchema = new Schema<UserDocument>(
   { collection: "users", timestamps: true, versionKey: false },
 );
 
-export const User = mongoose.models.User ?? mongoose.model("User", UserSchema);
+export const User = mongoose.models.User ?? mongoose.model<UserDocument>("User", UserSchema);
 export default User;

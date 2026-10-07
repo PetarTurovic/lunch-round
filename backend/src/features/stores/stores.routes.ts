@@ -1,16 +1,11 @@
 import { Router } from "express";
-import {
-  getStoreController,
-  getStoreMenuController,
-  getStoreMenuSummaryController,
-  getStoresController,
-} from "./stores.controller";
+import * as storeCtrl from "./stores.controller";
 
-const router = Router();
+export const storesRouter = Router();
 
-router.get("/", getStoresController);
-router.get("/:idOrSlug/menu", getStoreMenuController);
-router.get("/:idOrSlug/menu/summary", getStoreMenuSummaryController);
-router.get("/:idOrSlug", getStoreController);
+storesRouter.get("/", storeCtrl.getStores);
+storesRouter.get("/:idOrSlug", storeCtrl.getStore);
+storesRouter.get("/:idOrSlug/menu", storeCtrl.getStore);
+storesRouter.get("/:idOrSlug/menu/summary", storeCtrl.getStore);
 
-export default router;
+export default storesRouter;

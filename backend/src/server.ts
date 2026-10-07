@@ -1,23 +1,14 @@
-import { createApp } from "./app";
-import { connectDatabase } from "./shared/db/connection";
-import config from "./config";
+import app from "./app";
+import config, { connectDatabase } from "./config";
 
-const startServer = async () => {
-  const app = createApp();
-
-  try {
-    await connectDatabase();
-  } catch (error) {
-    console.error("Failed to connect to the database:", error);
-    process.exit(1);
-  }
-
+async function start() {
+  await connectDatabase();
   app.listen(config.port, () => {
-    console.log(
-      `Server running in ${config.nodeEnv} mode on port ${config.port}`,
-    );
-    console.log(`API base URL: http://localhost:${config.port}`);
+    console.log(`Server running on port ${config.port} (${config.nodeEnv})`);
   });
-};
+}
 
-startServer();
+start().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

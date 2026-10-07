@@ -1,17 +1,12 @@
 import { Router } from "express";
-import {
-  registerController,
-  loginController,
-  meController,
-  claimController,
-} from "./users.controller";
-import { requireAuth } from "./auth.middleware";
+import * as userCtrl from "./users.controller";
+import { requireAuth } from "../../auth.middleware";
 
-const router = Router();
+export const usersRouter = Router();
 
-router.post("/register", registerController);
-router.post("/login", loginController);
-router.get("/me", requireAuth, meController);
-router.post("/claim", requireAuth, claimController);
+usersRouter.post("/register", userCtrl.register);
+usersRouter.post("/login", userCtrl.login);
+usersRouter.get("/me", requireAuth, userCtrl.me);
+usersRouter.post("/claim", requireAuth, userCtrl.claim);
 
-export default router;
+export default usersRouter;

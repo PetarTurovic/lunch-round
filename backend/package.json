@@ -10,23 +10,17 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "type-check": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "verify:settlement": "tsx scripts/verify-settlement.ts",
-    "smoke:orders": "tsx scripts/smoke-order-domain.ts",
-    "smoke:api": "tsx scripts/smoke-api-auth.ts"
+    "format": "prettier --write \"src/**/*.ts\""
   },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.10.4",
-    "mongoose-paginate-v2": "^1.9.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
