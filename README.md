@@ -1,19 +1,46 @@
 # LunchRound
 
-A frontend-only React lunch ordering prototype for organizers and their teams. It includes session setup, participant ordering, automatic order locking, and a receipt-based cost breakdown.
+LunchRound is a group lunch ordering project with a React frontend and an
+Express/Mongoose backend.
 
-## Run locally
+## Project structure
 
-Run the frontend locally:
+- `frontend/` — React 19 and Vite. The current prototype supports lunch setup,
+  participant ordering, order locking, bill breakdowns, local bill history, and
+  light/dark themes. Demo data is stored in the current browser.
+- `backend/` — Express 5 and Mongoose API.
+
+## Getting started
+
+Requires Node.js 20 or newer. From the repository root:
 
 ```sh
-cd frontend
-npm install
+npm run setup
 npm run dev
 ```
 
-Vite serves the app from `frontend/src`. Tailwind CSS is compiled locally by the Vite plugin; Google Fonts are loaded from Google Fonts.
+The web app runs at `http://localhost:5173`. To run only the frontend:
 
-The demo starts with sample orders and saves changes in the current browser using `localStorage`. Sharing the generated link does not sync data between different browsers or devices yet.
+```sh
+npm run dev:web
+```
 
-Build the static frontend with `npm run build` from `frontend`.
+To install dependencies in both packages, build, or type-check:
+
+```sh
+npm run install:packages
+npm run build
+npm run type-check
+```
+
+Frontend-only commands can also be run from `frontend/` with `npm run dev`,
+`npm run build`, and `npm run type-check`.
+
+## Data and configuration
+
+The frontend prototype persists its demo state in browser `localStorage`;
+sharing a link does not synchronize data across browsers or devices.
+
+The backend uses MongoDB. Configure its connection with `MONGODB_URI` using
+`backend/.env.example` as a starting point. Backend domain and database notes
+are in `backend/docs/`.
