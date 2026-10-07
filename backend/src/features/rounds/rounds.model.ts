@@ -76,6 +76,7 @@ export const RoundSchema = new Schema<RoundDocument>(
       userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     },
     status: { type: String, enum: ["open", "locked", "settled"], default: "open" },
+    closesAt: { type: Date, default: null },
     shortlist: {
       type: [
         new Schema(
@@ -92,6 +93,7 @@ export const RoundSchema = new Schema<RoundDocument>(
       ],
       default: [],
     },
+    items: {
       type: [
         {
           id: { type: String, required: true },
