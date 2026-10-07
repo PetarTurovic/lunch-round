@@ -32,6 +32,5 @@ router.post("/:idOrSlug/orders/:orderId/payments", rMid, reqOrg, c.recordPayment
 
 router.post("/:idOrSlug/lock", rMid, reqOrg, c.lockRoundController);
 router.post("/:idOrSlug/settle", rMid, reqOrg, c.settleRoundController);
-router.get("/:idOrSlug/timeline", rMid, c.getTimelineController);
 
 export default router;

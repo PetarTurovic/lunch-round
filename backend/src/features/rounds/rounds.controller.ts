@@ -3,7 +3,6 @@ import { z } from "zod";
 import { Types } from "mongoose";
 import * as roundSvc from "./rounds.service";
 import { joinRoundService } from "../participants/participants.service";
-import { getRoundMoneyTimelineService } from "../order-events/order-events.service";
 
 const toObjectId = (v: unknown) => new Types.ObjectId(String(Array.isArray(v) ? v[0] : v));
 
@@ -41,7 +40,7 @@ export const updateRoundController = async (req: Request, res: Response) => {
     shortlist: z.array(z.string()).min(1).optional(),
     closesAt: z.coerce.date().nullable().optional(),
   }).parse(req.body);
-  res.json({ round: await roundSvc.updateRoundService(req.round!._id, body) });
+  res.json({ round: await roundSvc.updateRoundService(req.round!, body) });
 };
 
 export const deleteRoundController = async (req: Request, res: Response) => {
@@ -58,23 +57,23 @@ export const addSelectionController = async (req: Request, res: Response) => {
   const body = z.object({
     storeId: z.string(), itemId: z.string(), quantity: z.number().int().min(1).default(1), note: z.string().max(300).optional(),
   }).parse(req.body);
-  const item = await roundSvc.addSelectionService(req.round!._id, req.participant!._id, body);
+  const item = await roundSvc.addSelectionService(req.round!, req.participant!._id, body);
   res.status(201).json({ selection: item, item });
 };
 
 export const updateSelectionController = async (req: Request, res: Response) => {
   const body = z.object({ quantity: z.number().int().min(0).optional(), note: z.string().max(300).optional() }).parse(req.body);
-  const item = await roundSvc.updateSelectionService(req.round!._id, toObjectId(req.params.selectionId), req.participant!._id, Boolean(req.isOrganizer), body);
+  const item = await roundSvc.updateSelectionService(req.round!, toObjectId(req.params.selectionId), req.participant!._id, Boolean(req.isOrganizer), body);
   res.json({ selection: item, item });
 };
 
 export const removeSelectionController = async (req: Request, res: Response) => {
-  res.json(await roundSvc.removeSelectionService(req.round!._id, toObjectId(req.params.selectionId), req.participant!._id, Boolean(req.isOrganizer)));
+  res.json(await roundSvc.removeSelectionService(req.round!, toObjectId(req.params.selectionId), req.participant!._id, Boolean(req.isOrganizer)));
 };
 
 export const overridePriceController = async (req: Request, res: Response) => {
   const { unitPriceCents } = z.object({ unitPriceCents: z.number().int().min(0) }).parse(req.body);
-  const updatedPrice = await roundSvc.overrideSelectionPriceInRoundService(req.round!._id, toObjectId(req.params.selectionId), req.participant!._id, unitPriceCents);
+  const updatedPrice = await roundSvc.overrideSelectionPriceInRoundService(req.round!, toObjectId(req.params.selectionId), req.participant!._id, unitPriceCents);
   res.json({ unitPriceCents: updatedPrice });
 };
 
@@ -89,12 +88,12 @@ export const addAdjustmentController = async (req: Request, res: Response) => {
     amountCents: z.number().int().min(0),
     allocation: z.enum(["proportional", "equal"]).default("proportional"),
   }).parse(req.body);
-  const order = await roundSvc.addAdjustmentToOrderService(req.round!._id, toObjectId(req.params.orderId), req.participant!._id, body);
+  const order = await roundSvc.addAdjustmentToOrderService(req.round!, toObjectId(req.params.orderId), req.participant!._id, body);
   res.status(201).json({ order });
 };
 
 export const removeAdjustmentController = async (req: Request, res: Response) => {
-  const order = await roundSvc.removeAdjustmentFromOrderService(req.round!._id, toObjectId(req.params.orderId), req.participant!._id, toObjectId(req.params.adjustmentId));
+  const order = await roundSvc.removeAdjustmentFromOrderService(req.round!, toObjectId(req.params.orderId), req.participant!._id, toObjectId(req.params.adjustmentId));
   res.json({ order });
 };
 
@@ -105,20 +104,16 @@ export const recordPaymentController = async (req: Request, res: Response) => {
     method: z.string().max(40).optional(),
     note: z.string().max(300).optional(),
   }).parse(req.body);
-  const order = await roundSvc.recordPaymentService(req.round!._id, toObjectId(req.params.orderId), req.participant!._id, {
+  const order = await roundSvc.recordPaymentService(req.round!, toObjectId(req.params.orderId), req.participant!._id, {
     ...body, participantId: new Types.ObjectId(body.participantId),
   });
   res.status(201).json({ order });
 };
 
 export const lockRoundController = async (req: Request, res: Response) => {
-  res.json({ round: await roundSvc.lockRoundService(req.round!._id) });
+  res.json({ round: await roundSvc.lockRoundService(req.round!) });
 };
 
 export const settleRoundController = async (req: Request, res: Response) => {
-  res.json({ round: await roundSvc.settleRoundFreezeService(req.round!._id, req.participant!._id) });
-};
-
-export const getTimelineController = async (req: Request, res: Response) => {
-  res.json({ timeline: await getRoundMoneyTimelineService(req.round!._id) });
+  res.json({ round: await roundSvc.settleRoundFreezeService(req.round!, req.participant!._id) });
 };

@@ -7,9 +7,7 @@ import {
   type AdjustmentType, type AdjustmentAllocation,
 } from "./rounds.model";
 import { Store } from "../stores/stores.model";
-import { OrderEvent } from "../order-events/order-events.model";
 import { hashToken, generateToken } from "../participants/participants.service";
-import { recordOrderEvent } from "../order-events/order-events.service";
 import { settleOrder } from "../orders/orders.settlement";
 import { BadRequestError, NotFoundError, ForbiddenError } from "../../shared/errors";
 
@@ -42,8 +40,9 @@ const saveOrderChanges = async (round: HydratedDocument<RoundDocument>, order: E
   await saveRoundOrders(round);
 };
 
-const findRound = async (roundId: Types.ObjectId) => {
-  const round = await Round.findById(roundId);
+const resolveRound = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId): Promise<HydratedDocument<RoundDocument>> => {
+  if (typeof (roundOrId as any).save === "function") return roundOrId as HydratedDocument<RoundDocument>;
+  const round = await Round.findById(roundOrId);
   if (!round) throw new NotFoundError("Round");
   return round;
 };
@@ -62,13 +61,13 @@ const findOrder = (round: HydratedDocument<RoundDocument>, orderId: Types.Object
   return order;
 };
 
-const findRoundAndOrder = async (roundId: Types.ObjectId, orderId: Types.ObjectId) => {
-  const round = await findRound(roundId);
+const findRoundAndOrder = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, orderId: Types.ObjectId) => {
+  const round = await resolveRound(roundOrId);
   return { round, order: findOrder(round, orderId) };
 };
 
-const getAuthorizedSelection = async (roundId: Types.ObjectId, selectionId: Types.ObjectId, participantId: Types.ObjectId, isOrganizer: boolean) => {
-  const round = await findRound(roundId);
+const getAuthorizedSelection = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, selectionId: Types.ObjectId, participantId: Types.ObjectId, isOrganizer: boolean) => {
+  const round = await resolveRound(roundOrId);
   const { order, item } = findSelection(round, selectionId);
   if (!isOrganizer && !item.participantId.equals(participantId)) throw new ForbiddenError("You can only modify your own selections");
   return { round, order, item };
@@ -83,9 +82,6 @@ const toShortlistSnapshot = (store: any): ShortlistStoreSnapshot => ({
   rating: store.rating?.value ?? null,
   itemCount: store.stats?.itemCount ?? 0,
 });
-
-const audit = (roundId: Types.ObjectId, orderId: Types.ObjectId | null, actorParticipantId: Types.ObjectId | null, actorRole: "participant" | "organizer", entity: "order" | "selection" | "round", entityId: string, action: any, extra: Record<string, any> = {}) =>
-  recordOrderEvent({ roundId, orderId, actorParticipantId, actorRole, entity, entityId, action, ...extra });
 
 export const calculateRoundSettlement = (round: { currency: string; orders: EmbeddedOrder[]; participants: EmbeddedParticipant[] }) => {
   if (!round.orders.length || !round.participants.length) return null;
@@ -148,8 +144,8 @@ export const calculateRoundSettlement = (round: { currency: string; orders: Embe
 };
 
 export const deleteRoundCascadeService = async (roundId: Types.ObjectId) => {
-  const [events, round] = await Promise.all([OrderEvent.deleteMany({ roundId }), Round.deleteOne({ _id: roundId })]);
-  return { round: round.deletedCount ?? 0, orders: 0, selections: 0, participants: 0, events: events.deletedCount ?? 0 };
+  const result = await Round.deleteOne({ _id: roundId });
+  return { round: result.deletedCount ?? 0 };
 };
 
 export const createRoundService = async (input: { title: string; notes?: string; shortlist: string[]; organizerName: string; userId: Types.ObjectId; currency?: string; closesAt?: Date }) => {
@@ -202,8 +198,8 @@ export const getRoundByIdOrSlugService = async (idOrSlug: string) => {
   };
 };
 
-export const updateRoundService = async (roundId: Types.ObjectId, data: { title?: string; notes?: string; shortlist?: string[]; closesAt?: Date | null }) => {
-  const round = await findRound(roundId);
+export const updateRoundService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, data: { title?: string; notes?: string; shortlist?: string[]; closesAt?: Date | null }) => {
+  const round = await resolveRound(roundOrId);
   if (round.status === "settled") throw new BadRequestError("Cannot modify a settled round");
   if (data.title !== undefined) round.title = data.title.trim();
   if (data.notes !== undefined) round.notes = data.notes.trim() || undefined;
@@ -230,8 +226,8 @@ const getOrCreateOrder = (round: HydratedDocument<RoundDocument>, storeId: strin
   return order;
 };
 
-export const addSelectionService = async (roundId: Types.ObjectId, participantId: Types.ObjectId, data: { storeId: string; itemId: string; quantity: number; note?: string }) => {
-  const round = await findRound(roundId);
+export const addSelectionService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, participantId: Types.ObjectId, data: { storeId: string; itemId: string; quantity: number; note?: string }) => {
+  const round = await resolveRound(roundOrId);
   if (round.status === "locked" || round.status === "settled") throw new BadRequestError(`Cannot add items: round is ${round.status}`);
   if (!round.shortlist.some((s: ShortlistStoreSnapshot) => s._id === data.storeId)) throw new BadRequestError("Selected restaurant is not in the round shortlist");
 
@@ -266,93 +262,68 @@ export const addSelectionService = async (roundId: Types.ObjectId, participantId
   }
 
   await saveOrderChanges(round, order);
-  await audit(roundId, order._id, participantId, "participant", "selection", data.itemId, "selection_added", {
-    after: { quantity: item.quantity, unitPriceCents: item.unitPriceCents },
-    deltaCents: item.unitPriceCents * data.quantity,
-  });
   return item;
 };
 
-export const updateSelectionService = async (roundId: Types.ObjectId, selectionId: Types.ObjectId, participantId: Types.ObjectId, isOrganizer: boolean, data: { quantity?: number; note?: string }) => {
-  const { round, order, item } = await getAuthorizedSelection(roundId, selectionId, participantId, isOrganizer);
-  const prevQty = item.quantity;
+export const updateSelectionService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, selectionId: Types.ObjectId, participantId: Types.ObjectId, isOrganizer: boolean, data: { quantity?: number; note?: string }) => {
+  const { round, order, item } = await getAuthorizedSelection(roundOrId, selectionId, participantId, isOrganizer);
   if (data.quantity !== undefined) {
-    if (data.quantity <= 0) return removeSelectionService(roundId, selectionId, participantId, isOrganizer);
+    if (data.quantity <= 0) return removeSelectionService(round, selectionId, participantId, isOrganizer);
     item.quantity = data.quantity;
   }
   if (data.note !== undefined) item.note = data.note.trim() || null;
 
   await saveOrderChanges(round, order);
-  if (data.quantity !== undefined && data.quantity !== prevQty) {
-    await audit(roundId, order._id, participantId, isOrganizer ? "organizer" : "participant", "selection", item.itemId, "quantity_changed", {
-      before: prevQty, after: item.quantity, deltaCents: (item.quantity - prevQty) * item.unitPriceCents,
-    });
-  }
   return item;
 };
 
-export const removeSelectionService = async (roundId: Types.ObjectId, selectionId: Types.ObjectId, participantId: Types.ObjectId, isOrganizer: boolean) => {
-  const { round, order, item } = await getAuthorizedSelection(roundId, selectionId, participantId, isOrganizer);
+export const removeSelectionService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, selectionId: Types.ObjectId, participantId: Types.ObjectId, isOrganizer: boolean) => {
+  const { round, order, item } = await getAuthorizedSelection(roundOrId, selectionId, participantId, isOrganizer);
   item.status = "removed";
   await saveOrderChanges(round, order);
-  await audit(roundId, order._id, participantId, isOrganizer ? "organizer" : "participant", "selection", item.itemId, "selection_removed", {
-    before: item.quantity, after: 0, deltaCents: -(item.quantity * item.unitPriceCents),
-  });
   return { success: true };
 };
 
-export const overrideSelectionPriceInRoundService = async (roundId: Types.ObjectId, selectionId: Types.ObjectId, actorParticipantId: Types.ObjectId, unitPriceCents: number) => {
-  const round = await findRound(roundId);
+export const overrideSelectionPriceInRoundService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, selectionId: Types.ObjectId, _actorParticipantId: Types.ObjectId, unitPriceCents: number) => {
+  const round = await resolveRound(roundOrId);
   const { order, item } = findSelection(round, selectionId);
-  const prevPrice = item.unitPriceCents;
   const restoring = unitPriceCents === item.menuUnitPriceCents;
 
   item.unitPriceCents = unitPriceCents;
   item.priceOverridden = !restoring;
   await saveOrderChanges(round, order);
-
-  await audit(roundId, order._id, actorParticipantId, "organizer", "selection", item.itemId, restoring ? "price_restored" : "price_overridden", {
-    field: "unitPriceCents", before: prevPrice, after: unitPriceCents, deltaCents: (unitPriceCents - prevPrice) * item.quantity,
-  });
   return unitPriceCents;
 };
 
-export const addAdjustmentToOrderService = async (roundId: Types.ObjectId, orderId: Types.ObjectId, actorParticipantId: Types.ObjectId, adj: { label: string; type: AdjustmentType; amountCents: number; allocation: AdjustmentAllocation }) => {
-  const { round, order } = await findRoundAndOrder(roundId, orderId);
+export const addAdjustmentToOrderService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, orderId: Types.ObjectId, _actorParticipantId: Types.ObjectId, adj: { label: string; type: AdjustmentType; amountCents: number; allocation: AdjustmentAllocation }) => {
+  const { round, order } = await findRoundAndOrder(roundOrId, orderId);
   const newAdj: EmbeddedAdjustment = { _id: new Types.ObjectId(), label: adj.label.trim(), type: adj.type, amountCents: adj.amountCents, allocation: adj.allocation };
   order.adjustments.push(newAdj);
   await saveOrderChanges(round, order);
-  await audit(roundId, order._id, actorParticipantId, "organizer", "order", newAdj._id.toString(), "adjustment_added", {
-    after: newAdj, deltaCents: adj.type === "discount" ? -adj.amountCents : adj.amountCents,
-  });
   return order;
 };
 
-export const removeAdjustmentFromOrderService = async (roundId: Types.ObjectId, orderId: Types.ObjectId, actorParticipantId: Types.ObjectId, adjustmentId: Types.ObjectId) => {
-  const { round, order } = await findRoundAndOrder(roundId, orderId);
+export const removeAdjustmentFromOrderService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, orderId: Types.ObjectId, _actorParticipantId: Types.ObjectId, adjustmentId: Types.ObjectId) => {
+  const { round, order } = await findRoundAndOrder(roundOrId, orderId);
   const removed = order.adjustments.find((a) => a._id.equals(adjustmentId));
   if (!removed) throw new NotFoundError("Adjustment");
   order.adjustments = order.adjustments.filter((a) => !a._id.equals(adjustmentId));
   await saveOrderChanges(round, order);
-  await audit(roundId, order._id, actorParticipantId, "organizer", "order", adjustmentId.toString(), "adjustment_removed", {
-    before: removed, deltaCents: removed.type === "discount" ? removed.amountCents : -removed.amountCents,
-  });
   return order;
 };
 
-export const recordPaymentService = async (roundId: Types.ObjectId, orderId: Types.ObjectId, actorParticipantId: Types.ObjectId, pay: { participantId: Types.ObjectId; amountCents: number; method?: string; note?: string }) => {
-  const { round, order } = await findRoundAndOrder(roundId, orderId);
+export const recordPaymentService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, orderId: Types.ObjectId, _actorParticipantId: Types.ObjectId, pay: { participantId: Types.ObjectId; amountCents: number; method?: string; note?: string }) => {
+  const { round, order } = await findRoundAndOrder(roundOrId, orderId);
   const paymentEntry = { _id: new Types.ObjectId(), participantId: pay.participantId, amountCents: pay.amountCents, method: pay.method || null, note: pay.note || null, receivedAt: new Date() };
   order.payments.push(paymentEntry);
   order.paidCents += pay.amountCents;
   await saveRoundOrders(round);
-  await audit(roundId, order._id, actorParticipantId, "organizer", "order", paymentEntry._id.toString(), "payment_recorded", { after: paymentEntry });
   return order;
 };
 
 
-export const lockRoundService = async (roundId: Types.ObjectId) => {
-  const round = await findRound(roundId);
+export const lockRoundService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId) => {
+  const round = await resolveRound(roundOrId);
   for (const o of round.orders) {
     if (o.status === "open") { o.status = "locked"; o.lockedAt = new Date(); }
   }
@@ -362,14 +333,13 @@ export const lockRoundService = async (roundId: Types.ObjectId) => {
   return round;
 };
 
-export const settleRoundFreezeService = async (roundId: Types.ObjectId, actorParticipantId: Types.ObjectId) => {
-  const round = await findRound(roundId);
+export const settleRoundFreezeService = async (roundOrId: HydratedDocument<RoundDocument> | Types.ObjectId, _actorParticipantId: Types.ObjectId) => {
+  const round = await resolveRound(roundOrId);
   if (!round.participants.length) throw new BadRequestError("Cannot settle a round with no participants");
   const calculated = calculateRoundSettlement(round);
   if (!calculated) throw new BadRequestError("Cannot settle an empty round");
   round.settlement = { frozenAt: new Date(), currency: round.currency, orderTotalCents: calculated.totalCents, perParticipant: calculated.perParticipant };
   round.status = "settled";
   await round.save();
-  await audit(roundId, null, actorParticipantId, "organizer", "round", round._id.toString(), "round_settled", { after: round.settlement });
   return round;
 };

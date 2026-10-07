@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { Types } from "mongoose";
+import { Types, type HydratedDocument } from "mongoose";
 import config from "../../config";
 import { UnauthorizedError, ForbiddenError, NotFoundError } from "../../shared/errors";
 import { User } from "./users.model";
@@ -14,7 +14,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthUserPayload;
-      round?: RoundDocument;
+      round?: HydratedDocument<RoundDocument>;
       participant?: AuthenticatedParticipant;
       isOrganizer?: boolean;
     }
@@ -56,7 +56,7 @@ export const optionalAuth = async (req: Request, _res: Response, next: NextFunct
   next();
 };
 
-export const getRoundFromRequest = async (req: Request): Promise<RoundDocument> => {
+export const getRoundFromRequest = async (req: Request): Promise<HydratedDocument<RoundDocument>> => {
   if (req.round) return req.round;
   const raw = req.params.idOrSlug || req.params.roundId;
   if (!raw) throw new NotFoundError("Round identifier");
@@ -75,10 +75,10 @@ export const getParticipantFromRequest = async (req: Request) => {
 
   let participant: EmbeddedParticipant | null = null;
   if (rawToken) {
-    participant = round.participants.find((p) => p.tokenHash === hashToken(rawToken)) ?? null;
+    participant = round.participants.find((p: EmbeddedParticipant) => p.tokenHash === hashToken(rawToken)) ?? null;
   }
   if (!participant && req.user) {
-    participant = round.participants.find((p) => p.userId && p.userId.toString() === req.user!.id) ?? null;
+    participant = round.participants.find((p: EmbeddedParticipant) => p.userId && p.userId.toString() === req.user!.id) ?? null;
   }
 
   const isOrganizer = participant
