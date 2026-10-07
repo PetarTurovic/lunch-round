@@ -53,19 +53,30 @@ const itemSchema = z.object({
   imageUrl: z.string().optional(),
 });
 
+const parseRating = (r: any): number | null => {
+  if (typeof r === "number" && Number.isFinite(r)) return r;
+  if (r && typeof r === "object") {
+    const val = Number(r.value);
+    if (Number.isFinite(val)) return val;
+  }
+  return null;
+};
+
 const populateShortlist = async (storeIds: string[], items: RoundItem[] = []): Promise<RoundStoreSummary[]> => {
   if (!storeIds.length) return [];
   const stores = await Store.find({ _id: { $in: storeIds } }).lean();
   return storeIds.map((id) => {
     const store = stores.find((s) => String(s._id) === String(id));
     const item = items.find((i) => String(i.storeId) === String(id));
+    const count = items.filter((i) => String(i.storeId) === String(id)).length;
     return {
       _id: String(id),
-      slug: store?.slug,
+      slug: store?.slug || null,
       name: store?.name || item?.storeName || id,
-      platform: store?.platform,
-      currency: store?.currency || "EUR",
-      rating: store?.rating ?? null,
+      platform: store?.platform || "glovo",
+      currency: (store?.currency || "EUR").toUpperCase(),
+      rating: parseRating(store?.rating),
+      ...(count > 0 ? { itemCount: count } : {}),
     };
   });
 };
@@ -152,9 +163,13 @@ export const createRound = async (req: Request, res: Response) => {
     shortlist = await populateShortlist(storeIds, items);
   }
 
+  if (!shortlist.length) {
+    throw new BadRequestError("At least one restaurant must be selected for the round");
+  }
+
   const venue = body.venue?.trim()
     || (shortlist.length === 1 ? shortlist[0].name : shortlist.length > 1 ? "Multiple restaurants" : "Lunch Venue");
-  const currency = body.currency || shortlist[0]?.currency || "EUR";
+  const currency = (body.currency || shortlist[0]?.currency || "EUR").toUpperCase();
 
   const organizerOrder: RoundOrder = {
     participantId: organizerParticipantId,
@@ -166,6 +181,13 @@ export const createRound = async (req: Request, res: Response) => {
     updatedAt: new Date(),
   };
 
+  const organizerParticipant = {
+    participantId: organizerParticipantId,
+    name: organizerName,
+    userId,
+    isOrganizer: true,
+  };
+
   const round = await Round.create({
     slug: randomBytes(4).toString("hex"),
     title: body.title.trim(),
@@ -175,6 +197,7 @@ export const createRound = async (req: Request, res: Response) => {
     organizer: { participantId: organizerParticipantId, name: organizerName, userId },
     shortlist,
     items,
+    participants: [organizerParticipant],
     orders: [organizerOrder],
     feeCents: body.feeCents || 0,
     status: "open",
@@ -259,16 +282,26 @@ export const deleteRound = async (req: Request, res: Response) => {
 export const joinRound = async (req: Request, res: Response) => {
   const { name } = z.object({ name: z.string().min(1).max(100) }).parse(req.body);
   const token = generateToken();
+  const participantId = new Types.ObjectId();
+  const userId = req.user ? new Types.ObjectId(req.user.id) : null;
+  const participantName = name.trim();
+
   const participant: RoundOrder = {
-    participantId: new Types.ObjectId(),
-    name: name.trim(),
-    userId: req.user ? new Types.ObjectId(req.user.id) : null,
+    participantId,
+    name: participantName,
+    userId,
     tokenHash: hashToken(token),
     joinedAt: new Date(),
     quantities: {},
     updatedAt: new Date(),
   };
 
+  req.round!.participants.push({
+    participantId,
+    name: participantName,
+    userId,
+    isOrganizer: false,
+  });
   req.round!.orders.push(participant);
   await req.round!.save();
   res.status(201).json({ participant, token });
@@ -325,7 +358,21 @@ export const settleRound = async (req: Request, res: Response) => {
   if (typeof req.body?.feeCents === "number") round.feeCents = req.body.feeCents;
   if (Array.isArray(req.body?.items)) round.items = req.body.items;
 
-  round.bill = calculateRoundBill(round.toObject() as any);
+  const bill = calculateRoundBill(round.toObject() as any);
+  round.bill = bill;
+  round.settlement = {
+    isLive: false,
+    totalCents: bill.totalCents,
+    orderTotalCents: bill.totalCents,
+    perParticipant: bill.people.map((p, idx) => ({
+      participantId: String(round.orders[idx]?.participantId || ""),
+      participantName: p.name,
+      totalCents: p.amountCents,
+      itemsCents: p.amountCents,
+      adjustmentsCents: 0,
+    })),
+    frozenAt: bill.settledAt.toISOString(),
+  };
   round.status = "settled";
   await round.save();
 

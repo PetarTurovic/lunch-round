@@ -28,6 +28,9 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   } else if (err?.name === "ValidationError") {
     status = 400;
     message = err.message;
+  } else if (err?.name === "MongoServerError" && err?.code === 121) {
+    status = 400;
+    message = "Database document validation failed";
   }
 
   if (!isAppError && status === 500) console.error("Unhandled error:", err);

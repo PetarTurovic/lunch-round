@@ -53,6 +53,14 @@ export const optionalAuth = async (req: Request, _res: Response, next: NextFunct
 export const resolveRound = (options?: { requireOrganizer?: boolean; requireParticipant?: boolean }) => {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
+      if (!req.user && req.headers.authorization?.startsWith("Bearer ")) {
+        try {
+          const payload = jwt.verify(req.headers.authorization.split(" ")[1], config.jwtSecret) as AuthUserPayload;
+          const user = await User.findById(payload.id).lean();
+          if (user) req.user = { id: user._id.toString(), email: user.email, name: user.name };
+        } catch {}
+      }
+
       const id = String(req.params.idOrSlug || req.params.roundId || "");
       const round = await Round.findOne(Types.ObjectId.isValid(id) ? { $or: [{ _id: id }, { slug: id }] } : { slug: id });
       if (!round) throw new NotFoundError("Round");

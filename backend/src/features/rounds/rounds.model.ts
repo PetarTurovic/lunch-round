@@ -6,11 +6,19 @@ export const generateToken = (): string => randomBytes(24).toString("hex");
 
 export interface RoundStoreSummary {
   _id: string;
-  slug?: string;
+  slug?: string | null;
   name: string;
-  platform?: string;
-  currency?: string;
-  rating?: number | { value?: number | null } | null;
+  platform: string;
+  currency: string;
+  rating?: number | null;
+  itemCount?: number;
+}
+
+export interface RoundParticipant {
+  participantId: Types.ObjectId;
+  name: string;
+  userId?: Types.ObjectId | null;
+  isOrganizer: boolean;
 }
 
 export interface RoundItem {
@@ -50,15 +58,17 @@ export interface RoundDocument {
   organizer: {
     participantId: Types.ObjectId;
     name: string;
-    userId?: Types.ObjectId | null;
+    userId: Types.ObjectId;
   };
-  status: "open" | "locked" | "settled";
+  status: "open" | "locked" | "ordered" | "settled";
   closesAt?: Date | null;
   shortlist: RoundStoreSummary[];
   items: RoundItem[];
+  participants: RoundParticipant[];
   orders: RoundOrder[];
   feeCents: number;
   bill?: RoundBill | null;
+  settlement?: any;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -75,18 +85,19 @@ export const RoundSchema = new Schema<RoundDocument>(
       name: { type: String, required: true },
       userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     },
-    status: { type: String, enum: ["open", "locked", "settled"], default: "open" },
+    status: { type: String, enum: ["open", "locked", "ordered", "settled"], default: "open" },
     closesAt: { type: Date, default: null },
     shortlist: {
       type: [
         new Schema(
           {
             _id: { type: String, required: true },
-            slug: String,
+            slug: { type: String, default: null },
             name: { type: String, required: true },
-            platform: String,
-            currency: String,
-            rating: Schema.Types.Mixed,
+            platform: { type: String, required: true, default: "glovo" },
+            currency: { type: String, required: true, default: "EUR" },
+            rating: { type: Number, default: null },
+            itemCount: { type: Number },
           },
           { _id: false },
         ),
@@ -108,6 +119,18 @@ export const RoundSchema = new Schema<RoundDocument>(
       ],
       default: [],
     },
+    participants: {
+      type: [
+        {
+          _id: false,
+          participantId: { type: Schema.Types.ObjectId, required: true },
+          name: { type: String, required: true, trim: true },
+          userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+          isOrganizer: { type: Boolean, default: false },
+        },
+      ],
+      default: [],
+    },
     orders: {
       type: [
         {
@@ -124,6 +147,7 @@ export const RoundSchema = new Schema<RoundDocument>(
     },
     feeCents: { type: Number, default: 0 },
     bill: { type: Schema.Types.Mixed, default: null },
+    settlement: { type: Schema.Types.Mixed, default: null },
   },
   { collection: "rounds", timestamps: true, versionKey: false },
 );
