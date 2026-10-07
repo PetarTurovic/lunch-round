@@ -4,6 +4,15 @@ import { createHash, randomBytes } from "node:crypto";
 export const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
 export const generateToken = (): string => randomBytes(24).toString("hex");
 
+export interface RoundStoreSummary {
+  _id: string;
+  slug?: string;
+  name: string;
+  platform?: string;
+  currency?: string;
+  rating?: number | { value?: number | null } | null;
+}
+
 export interface RoundItem {
   id: string;
   name: string;
@@ -36,14 +45,16 @@ export interface RoundDocument {
   slug: string;
   title: string;
   venue: string;
+  currency: string;
   location?: { lat: number; lon: number; radiusKm?: number } | null;
   organizer: {
     participantId: Types.ObjectId;
     name: string;
-    userId: Types.ObjectId;
+    userId?: Types.ObjectId | null;
   };
   status: "open" | "locked" | "settled";
   closesAt?: Date | null;
+  shortlist: RoundStoreSummary[];
   items: RoundItem[];
   orders: RoundOrder[];
   feeCents: number;
@@ -57,14 +68,16 @@ export const RoundSchema = new Schema<RoundDocument>(
     slug: { type: String, required: true, unique: true },
     title: { type: String, required: true, trim: true },
     venue: { type: String, required: true, default: "Lunch Venue" },
+    currency: { type: String, default: "EUR" },
     location: { type: Schema.Types.Mixed, default: null },
     organizer: {
       participantId: { type: Schema.Types.ObjectId, required: true },
       name: { type: String, required: true },
-      userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+      userId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     },
     status: { type: String, enum: ["open", "locked", "settled"], default: "open" },
     closesAt: { type: Date, default: null },
+    shortlist: { type: [Schema.Types.Mixed], default: [] },
     items: {
       type: [
         {
