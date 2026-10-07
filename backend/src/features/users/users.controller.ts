@@ -1,11 +1,28 @@
 import type { Request, Response } from "express";
 import { Types } from "mongoose";
-import bcrypt from "bcryptjs";
+import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { ConflictError, NotFoundError, UnauthorizedError } from "../../errors";
 import { signUserToken } from "../../auth.middleware";
 import { User } from "./users.model";
 import { Round, hashToken, type RoundOrder } from "../rounds/rounds.model";
+
+const scryptAsync = promisify(scrypt);
+
+const hashPassword = async (password: string): Promise<string> => {
+  const salt = randomBytes(16).toString("hex");
+  const key = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${key.toString("hex")}`;
+};
+
+const verifyPassword = async (password: string, storedHash: string): Promise<boolean> => {
+  const [salt, key] = storedHash.split(":");
+  if (!salt || !key) return false;
+  const keyBuffer = Buffer.from(key, "hex");
+  const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
+  return keyBuffer.length === derivedKey.length && timingSafeEqual(keyBuffer, derivedKey);
+};
 
 const authResponse = (u: any) => ({
   token: signUserToken({ _id: u._id, email: u.email, name: u.name }),
@@ -24,7 +41,7 @@ export const register = async (req: Request, res: Response) => {
     throw new ConflictError("A user with this email already exists");
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await hashPassword(password);
   const user = await User.create({ name: name.trim(), email: normalizedEmail, passwordHash });
   res.status(201).json(authResponse(user));
 };
@@ -36,7 +53,7 @@ export const login = async (req: Request, res: Response) => {
   }).parse(req.body);
 
   const user = await User.findOne({ email: email.toLowerCase().trim() });
-  if (!user || !user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
+  if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
     throw new UnauthorizedError("Invalid email or password");
   }
 
