@@ -20,16 +20,18 @@ const resolveRound = async (
 };
 
 export const calculateRoundSettlement = (round: RoundDocument): RoundSettlement => {
+  const priceMap = new Map(round.items.map((item) => [item.id, Number(item.priceCents || 0)]));
+
   const people = round.orders.map((order) => {
-    const quantitiesObj =
+    const quantities =
       order.quantities instanceof Map
         ? Object.fromEntries(order.quantities.entries())
         : (order.quantities || {});
 
-    const foodCents = round.items.reduce((sum, item) => {
-      const qty = Number(quantitiesObj[item.id] || 0);
-      return sum + qty * Number(item.priceCents || 0);
-    }, 0);
+    const foodCents = Object.entries(quantities).reduce(
+      (sum, [itemId, qty]) => sum + Number(qty || 0) * (priceMap.get(itemId) || 0),
+      0,
+    );
 
     return {
       name: order.name,
@@ -40,26 +42,20 @@ export const calculateRoundSettlement = (round: RoundDocument): RoundSettlement 
   });
 
   const totalFoodCents = people.reduce((sum, p) => sum + p.foodCents, 0);
-  const totalCents = totalFoodCents + Number(round.feeCents || 0);
+  const feeCents = Number(round.feeCents || 0);
 
-  if (totalFoodCents > 0 && round.feeCents > 0) {
-    let remainingFee = round.feeCents;
+  if (totalFoodCents > 0 && feeCents > 0) {
     people.forEach((p) => {
-      p.feeCents = Math.floor((round.feeCents * p.foodCents) / totalFoodCents);
+      p.feeCents = Math.round((feeCents * p.foodCents) / totalFoodCents);
       p.totalCents = p.foodCents + p.feeCents;
-      remainingFee -= p.feeCents;
     });
-
-    for (let i = 0; remainingFee > 0; i = (i + 1) % people.length) {
-      if (people[i].foodCents > 0) {
-        people[i].feeCents++;
-        people[i].totalCents++;
-        remainingFee--;
-      }
-    }
   }
 
-  return { settledAt: new Date(), totalCents, people };
+  return {
+    settledAt: new Date(),
+    totalCents: totalFoodCents + feeCents,
+    people,
+  };
 };
 
 export const createRoundService = async (input: {
