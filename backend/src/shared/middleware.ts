@@ -1,11 +1,21 @@
 import cors from "cors";
 import type { ErrorRequestHandler, RequestHandler } from "express";
+import { z } from "zod";
 import { AppError } from "./errors";
 
 export const corsOptions: cors.CorsOptions = { origin: process.env.CORS_ORIGIN?.split(",") ?? "*" };
 
 export const notFound: RequestHandler = (req, _res, next) => {
   next(new AppError(`Route ${req.method} ${req.originalUrl} not found`, 404));
+};
+
+export const validate = (schema: { body?: z.ZodTypeAny; query?: z.ZodTypeAny; params?: z.ZodTypeAny }): RequestHandler => {
+  return (req, _res, next) => {
+    if (schema.body) req.body = schema.body.parse(req.body);
+    if (schema.query) req.query = schema.query.parse(req.query) as any;
+    if (schema.params) req.params = schema.params.parse(req.params) as any;
+    next();
+  };
 };
 
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
