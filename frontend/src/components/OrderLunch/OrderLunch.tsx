@@ -111,6 +111,14 @@ function OrderLunch({
 
       <div className="grid items-start gap-5">
         <div className="grid gap-3">
+          {!items.length && (
+            <Card className="border-amber-200 bg-amber-50">
+              <h2 className="mb-1 font-display text-sm font-bold text-amber-950">This round has no saved menu</h2>
+              <p className="mb-0 text-[10px] leading-relaxed text-amber-900">
+                It was created before restaurant menus were added to rounds. Ask the organizer to create a new round so the selected restaurants and dishes are included.
+              </p>
+            </Card>
+          )}
           <Card className="flex items-center gap-3 p-4 max-sm:flex-wrap">
             <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-green-50 text-2xl" aria-hidden="true">♧</div>
             <div className="min-w-0"><span className="mb-1 block text-[8px] font-bold tracking-widest text-stone-500">RESTAURANTS IN THIS ROUND</span><h2 className="mb-1 font-display text-sm font-bold">{round.shortlist?.length || 0} selected</h2><p className="mb-0 text-[9px] text-stone-500">Choose dishes from any restaurant below.</p></div>
@@ -125,7 +133,7 @@ function OrderLunch({
                 return (
                   <div className={`flex min-h-[68px] items-center gap-2 rounded-lg border border-stone-200 p-2.5 sm:gap-3 ${locked ? "bg-stone-50" : "bg-white"}`} key={item.id}>
                     <DishAvatar name={item.name} index={index} />
-                    <div className="min-w-0 flex-1"><strong className="mb-1 block text-[10px] text-stone-800">{item.name}</strong><small className="block truncate text-[9px] text-stone-500">{item.storeName}{item.description ? ` · ${item.description}` : ""}</small></div>
+                    <div className="min-w-0 flex-1"><strong className="mb-1 block text-[10px] text-stone-800">{item.name}</strong><small className="block truncate text-[9px] text-stone-500">{[item.storeName, item.section, item.description].filter(Boolean).join(" · ")}</small></div>
                     <span className="whitespace-nowrap text-[10px] font-semibold text-stone-700">{euro(item.price, item.currency)}</span>
                     <div className="flex items-center gap-1 rounded-lg border border-stone-200 p-1" aria-label={`${item.name} quantity`}>
                       <button className="grid h-6 w-6 place-items-center rounded-md bg-green-50 text-base text-green-800 hover:bg-green-100 disabled:bg-stone-50 disabled:text-stone-300" type="button" disabled={locked || loading || !participant || quantity === 0} aria-label={`Remove one ${item.name}`} onClick={() => onChangeQuantity(item, quantity - 1)}>−</button>

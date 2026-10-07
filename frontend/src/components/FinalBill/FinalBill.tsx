@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { euro, initials, safeNumber } from "../../utils";
+import { euro, initials } from "../../utils";
 import type { FinalSelection, Round, Settlement } from "../../types";
 
 const avatarClasses = [
@@ -29,7 +29,6 @@ interface FinalBillProps {
   loading: boolean;
   onLock: () => void;
   onSettle: () => void;
-  onPriceChange: (id: string, price: number) => void;
   onCopyBreakdown: () => void;
   onBackToOrders: () => void;
 }
@@ -44,12 +43,10 @@ function FinalBill({
   loading,
   onLock,
   onSettle,
-  onPriceChange,
   onCopyBreakdown,
   onBackToOrders
 }: FinalBillProps) {
   const participants = settlement?.perParticipant || [];
-  const canEditPrices = isOrganizer && round?.status !== "settled";
   const settled = round?.status === "settled";
 
   return (
@@ -85,15 +82,13 @@ function FinalBill({
                     <span className={`grid h-8 w-8 place-items-center rounded-lg font-display text-[10px] font-bold ${dishClasses[index % dishClasses.length]}`}>{initials(selection.name)}</span>
                     <span className="min-w-0"><strong className="block truncate text-[9px] text-stone-800">{selection.name}</strong><small className="mt-1 block truncate text-[8px] text-stone-500">{selection.personName} · {selection.storeName}{selection.overridden ? " · adjusted" : ""}</small></span>
                     <span className="text-center text-[9px] text-stone-600"><strong className="text-stone-800">{selection.quantity}</strong> ×</span>
-                    {canEditPrices ? (
-                      <label className="flex h-[30px] items-center gap-1 rounded-md border border-stone-200 px-2 text-[9px]"><span>{round.currency || "EUR"}</span><input className="w-14 border-0 text-right text-[9px] outline-none" aria-label={`Final unit price for ${selection.name}`} type="number" min="0" step="0.01" key={`${selection.id}-${selection.unitPrice}`} defaultValue={safeNumber(selection.unitPrice)} disabled={loading} onBlur={(event) => { const price = safeNumber(event.target.value); if (price !== selection.unitPrice) onPriceChange(selection.id, price); }} /></label>
-                    ) : <strong className="text-right text-[9px]">{euro(selection.unitPrice, round.currency)}</strong>}
+                    <strong className="text-right text-[9px]">{euro(selection.unitPrice, round.currency)}</strong>
                   </div>
                 ))}
                 {!selections.length && <p className="py-3 text-[10px] text-stone-500">There are no active menu selections yet.</p>}
               </div>
               <div className="flex justify-between py-4 text-[10px] font-semibold"><span>Round total</span><strong className="font-display text-base">{euro(total, round.currency)}</strong></div>
-              <div className="flex gap-2 rounded-lg bg-stone-50 p-3 text-[8px] leading-relaxed text-stone-600"><span className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-stone-300">i</span> Totals use the backend’s cent-based settlement calculation, including restaurant adjustments and rounding.</div>
+              <div className="flex gap-2 rounded-lg bg-stone-50 p-3 text-[8px] leading-relaxed text-stone-600"><span className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-stone-300">i</span> Totals use the backend’s cent-based settlement calculation, including any round fee and rounding.</div>
             </Card>
 
             <Card className="p-5">

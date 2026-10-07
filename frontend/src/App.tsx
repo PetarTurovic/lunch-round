@@ -13,9 +13,11 @@ import type {
   OrderMenuItem,
   Participant,
   ParticipantOrder,
+  RoundItem,
   Round,
   Session,
   Store,
+  StoreSummary,
   Theme,
   User,
   View
@@ -60,31 +62,99 @@ function readSavedTheme(): Theme {
   }
 }
 
-function menuItemsForRound(round: Round, stores: Store[]): OrderMenuItem[] {
-  const selections = round.selections || [];
-  return stores.flatMap((store) => (store.menu?.sections || []).flatMap((section) =>
-    (section.items || []).filter((item) => item.available !== false).map((item) => {
-      const key = `${store._id}:${item._id}`;
-      const activeSelections = selections.filter((selection) =>
-        selection.storeId === store._id &&
-        selection.itemId === item._id &&
-        selection.status === "active"
-      );
-      return {
-        id: key,
-        menuItemId: item._id,
-        storeId: store._id,
-        storeName: store.name,
-        section: section.title,
-        name: item.name,
-        description: item.description || "",
-        price: safeNumber(item.price),
-        currency: store.currency || round.currency || "EUR",
-        imageUrl: item.imageUrl || "",
-        selections: activeSelections
-      };
-    })
-  ));
+function normalizeRound(source: Round): Round {
+  const items = Array.isArray(source.items) ? source.items : [];
+  const orders = Array.isArray(source.orders) ? source.orders : [];
+  const participants = orders.map((order) => {
+    const participantId = String(order.participantId || "");
+    return {
+      _id: participantId,
+      participantId,
+      name: order.name || "Participant",
+      isOrganizer: participantId === String(source.organizer?.participantId || ""),
+      userId: order.userId || undefined
+    };
+  });
+  const selections = orders.flatMap((order) => Object.entries(order.quantities || {})
+    .filter(([, quantity]) => quantity > 0)
+    .flatMap(([itemId, quantity]) => {
+      const item = items.find((entry) => entry.id === itemId);
+      if (!item || !order.participantId) return [];
+      return [{
+        _id: `${order.participantId}:${item.id}`,
+        participantId: String(order.participantId),
+        storeId: item.storeId || item.storeName || "restaurant",
+        itemId: item.id,
+        quantity,
+        status: "active",
+        unitPriceCents: item.priceCents,
+        itemSnapshot: { name: item.name, imageUrl: item.imageUrl }
+      }];
+    }));
+  const storesById = new Map<string, StoreSummary>();
+  for (const item of items) {
+    if (item.storeId && item.storeName) {
+      storesById.set(item.storeId, { _id: item.storeId, name: item.storeName });
+    }
+  }
+  const foodTotals = orders.map((order) => Object.entries(order.quantities || {}).reduce((sum, [itemId, quantity]) => {
+    const item = items.find((entry) => entry.id === itemId);
+    return sum + (item?.priceCents || 0) * quantity;
+  }, 0));
+  const totalFoodCents = foodTotals.reduce((sum, value) => sum + value, 0);
+  const feeCents = source.feeCents || 0;
+  const totalCents = source.bill?.totalCents ?? totalFoodCents + feeCents;
+  const billPeople = source.bill?.people || orders.map((order, index) => ({
+    name: order.name || "Participant",
+    amountCents: foodTotals[index] + (totalFoodCents ? Math.round(feeCents * foodTotals[index] / totalFoodCents) : 0)
+  }));
+
+  return {
+    ...source,
+    items,
+    orders,
+    currency: source.currency || "EUR",
+    shortlist: source.shortlist?.length ? source.shortlist : Array.from(storesById.values()),
+    participants: participants.length ? participants : source.participants || [],
+    selections,
+    settlementView: {
+      isLive: source.status !== "settled",
+      totalCents,
+      orderTotalCents: totalCents,
+      perParticipant: billPeople.map((person, index) => ({
+        participantId: String(orders[index]?.participantId || ""),
+        participantName: person.name,
+        itemsCents: foodTotals[index] || 0,
+        adjustmentsCents: person.amountCents - (foodTotals[index] || 0),
+        totalCents: person.amountCents
+      })),
+      frozenAt: source.bill?.settledAt
+    },
+    settlement: {
+      isLive: source.status !== "settled",
+      totalCents,
+      orderTotalCents: totalCents,
+      frozenAt: source.bill?.settledAt
+    }
+  };
+}
+
+function menuItemsForRound(round: Round): OrderMenuItem[] {
+  return round.items.map((item: RoundItem) => ({
+    id: item.id,
+    menuItemId: item.id,
+    storeId: item.storeId || item.storeName || "restaurant",
+    storeName: item.storeName || round.venue || "Restaurant",
+    section: item.section || "",
+    name: item.name,
+    description: item.description || "",
+    price: safeNumber(item.priceCents) / 100,
+    currency: round.currency || "EUR",
+    imageUrl: item.imageUrl || "",
+    selections: round.selections.filter((selection) =>
+      selection.itemId === item.id && selection.status === "active"
+    )
+  }));
 }
 
 function App() {
@@ -92,7 +162,6 @@ function App() {
   const [showLogin, setShowLogin] = useState(() => !session.authToken);
   const [view, setView] = useState<View>("setup");
   const [round, setRound] = useState<Round | null>(null);
-  const [roundStores, setRoundStores] = useState<Store[]>([]);
   const [participant, setParticipant] = useState<Participant | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [roundLoading, setRoundLoading] = useState(false);
@@ -148,7 +217,6 @@ function App() {
     const slug = session.roundSlug;
     if (!slug) {
       setRound(null);
-      setRoundStores([]);
       setParticipant(null);
       setIsOrganizer(false);
       setRoundLoading(false);
@@ -163,13 +231,7 @@ function App() {
     async function loadRound() {
       try {
         const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(slug)}`);
-        const nextRound = result.round;
-        const storeResults = await Promise.all(
-          (nextRound.shortlist || []).map((store) =>
-            apiRequest<{ store: Store }>(`/stores/${encodeURIComponent(store._id)}`)
-          )
-        );
-        const nextStores = storeResults.map((storeResult) => storeResult.store);
+        const nextRound = normalizeRound(result.round);
         let nextParticipant: Participant | null = null;
         let organizer = false;
         let invalidParticipantToken = false;
@@ -180,7 +242,9 @@ function App() {
               `/rounds/${encodeURIComponent(slug)}/me`,
               { participantToken: session.participantToken }
             );
-            nextParticipant = me.participant;
+            nextParticipant = me.participant
+              ? { ...me.participant, _id: String(me.participant.participantId || me.participant._id) }
+              : null;
             organizer = Boolean(me.isOrganizer);
           } catch (error) {
             console.error("Could not verify the saved participant session.", error);
@@ -190,7 +254,6 @@ function App() {
 
         if (cancelled) return;
         setRound(nextRound);
-        setRoundStores(nextStores);
         setParticipant(nextParticipant);
         setIsOrganizer(organizer);
         if (invalidParticipantToken) {
@@ -203,7 +266,6 @@ function App() {
         console.error("Could not load the lunch round from the backend.", error);
         setRoundError(errorMessage(error));
         setRound(null);
-        setRoundStores([]);
         setParticipant(null);
         setIsOrganizer(false);
       } finally {
@@ -256,7 +318,7 @@ function App() {
     async function loadHistory() {
       try {
         const { rounds } = await apiRequest<{ rounds: HistoryRound[] }>("/rounds?limit=50", { token: session.authToken });
-        if (!cancelled) setHistoryRounds(rounds);
+        if (!cancelled) setHistoryRounds(rounds.map(normalizeRound));
       } catch (error) {
         if (!cancelled) {
           console.error("Could not load saved rounds from the backend.", error);
@@ -272,10 +334,7 @@ function App() {
     return () => { cancelled = true; };
   }, [view, session.authToken]);
 
-  const visibleItems = useMemo(
-    () => round && roundStores.length ? menuItemsForRound(round, roundStores) : [],
-    [round, roundStores]
-  );
+  const visibleItems = useMemo(() => round ? menuItemsForRound(round) : [], [round]);
   const activeSelections = useMemo(
     () => (round?.selections || []).filter((selection) => selection.status === "active"),
     [round]
@@ -342,17 +401,38 @@ function App() {
   async function createRound({ title, closesAt }: { title: string; closesAt: string }): Promise<void> {
     if (!session.authToken) throw new Error("Sign in before creating a lunch round.");
     if (!selectedStoreIds.length) throw new Error("Choose at least one restaurant.");
+    const selectedStores = await Promise.all(selectedStoreIds.map(async (storeId) => {
+      const { store } = await apiRequest<{ store: Store }>(`/stores/${encodeURIComponent(storeId)}`);
+      return store;
+    }));
+    const items = selectedStores.flatMap((store) => (store.menu?.sections || []).flatMap((section) =>
+      (section.items || [])
+        .filter((item) => item.available !== false && typeof item.price === "number" && Number.isFinite(item.price) && item.price >= 0)
+        .map((item) => ({
+          id: `${store._id}:${item._id}`,
+          name: item.name,
+          description: item.description || undefined,
+          priceCents: Math.round(Number(item.price) * 100),
+          storeId: store._id,
+          storeName: store.name,
+          section: section.title,
+          imageUrl: item.imageUrl || undefined
+        }))
+    ));
+    if (!items.length) throw new Error("The selected restaurants have no available menu items with prices.");
     const result = await apiRequest<{ round: Round; organizerToken: string }>("/rounds", {
       method: "POST",
       token: session.authToken,
       body: jsonBody({
         title,
-        shortlist: selectedStoreIds,
+        venue: selectedStores.length === 1 ? selectedStores[0].name : "Multiple restaurants",
+        items,
         closesAt: closesAt ? new Date(closesAt).toISOString() : undefined,
         organizerName: session.user?.name
       })
     });
     const nextSlug = result.round.slug;
+    setRound(normalizeRound(result.round));
     updateSession({ roundSlug: nextSlug, participantToken: result.organizerToken });
     setRoundInUrl(nextSlug);
     setSelectedStoreIds([]);
@@ -375,15 +455,13 @@ function App() {
   async function refreshRound(): Promise<void> {
     if (!session.roundSlug) return;
     const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(session.roundSlug)}`);
-    const storeResults = await Promise.all(
-      (result.round.shortlist || []).map((store) => apiRequest<{ store: Store }>(`/stores/${encodeURIComponent(store._id)}`))
-    );
     const me = session.participantToken
       ? await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(`/rounds/${encodeURIComponent(session.roundSlug)}/me`, { participantToken: session.participantToken })
       : { participant: null, isOrganizer: false };
-    setRound(result.round);
-    setRoundStores(storeResults.map((entry) => entry.store));
-    setParticipant(me.participant);
+    setRound(normalizeRound(result.round));
+    setParticipant(me.participant
+      ? { ...me.participant, _id: String(me.participant.participantId || me.participant._id) }
+      : null);
     setIsOrganizer(Boolean(me.isOrganizer));
   }
 
@@ -391,21 +469,17 @@ function App() {
     if (!participant) throw new Error("Join this round before adding menu items.");
     if (locked) throw new Error("This lunch round is locked.");
     if (!round) throw new Error("Load a lunch round before adding menu items.");
-    const existing = item.selections.find((entry) => String(entry.participantId) === String(participant._id));
-    const path = `/rounds/${encodeURIComponent(round.slug)}/selections`;
-    if (!existing && nextQuantity > 0) {
-      await apiRequest(path, {
-        method: "POST",
-        participantToken: session.participantToken,
-        body: jsonBody({ storeId: item.storeId, itemId: item.menuItemId, quantity: nextQuantity })
-      });
-    } else if (existing) {
-      await apiRequest(`${path}/${encodeURIComponent(existing._id)}`, {
-        method: "PATCH",
-        participantToken: session.participantToken,
-        body: jsonBody({ quantity: nextQuantity })
-      });
-    }
+    const currentQuantities = round.orders.find((order) =>
+      String(order.participantId) === String(participant._id)
+    )?.quantities || {};
+    const quantities = { ...currentQuantities };
+    if (nextQuantity > 0) quantities[item.id] = nextQuantity;
+    else delete quantities[item.id];
+    await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/order`, {
+      method: "POST",
+      participantToken: session.participantToken,
+      body: jsonBody({ quantities })
+    });
     await refreshRound();
   }
 
@@ -418,17 +492,6 @@ function App() {
     });
     await refreshRound();
     notify("Orders locked in the database.");
-  }
-
-  async function overrideSelectionPrice(selectionId: string, price: number): Promise<void> {
-    if (!isOrganizer) throw new Error("Only the organizer can adjust final prices.");
-    if (!round) throw new Error("Load a lunch round before adjusting prices.");
-    await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/selections/${encodeURIComponent(selectionId)}/price`, {
-      method: "POST",
-      participantToken: session.participantToken,
-      body: jsonBody({ unitPriceCents: Math.round(safeNumber(price) * 100) })
-    });
-    await refreshRound();
   }
 
   async function settleRound(): Promise<void> {
@@ -451,7 +514,6 @@ function App() {
     });
     setRoundInUrl(roundSlug);
     setRound(null);
-    setRoundStores([]);
     setParticipant(null);
     setIsOrganizer(false);
     setView("ledger");
@@ -477,13 +539,12 @@ function App() {
 
   const isBusy = busy || roundLoading;
   const finalSelectionRows = activeSelections.map((selection) => {
-    const item = visibleItems.find((entry) => entry.storeId === selection.storeId && entry.menuItemId === selection.itemId);
+    const item = visibleItems.find((entry) => entry.id === selection.itemId);
     const person = round?.participants?.find((entry) => String(entry._id) === String(selection.participantId));
-    const store = roundStores.find((entry) => entry._id === selection.storeId);
     return {
       id: selection._id,
       name: selection.itemSnapshot?.name || item?.name || "Menu item",
-      storeName: store?.name || round?.shortlist?.find((entry) => entry._id === selection.storeId)?.name || "Restaurant",
+      storeName: item?.storeName || "Restaurant",
       personName: person?.name || "Participant",
       quantity: selection.quantity,
       unitPrice: safeNumber(selection.unitPriceCents) / 100,
@@ -636,7 +697,6 @@ function App() {
             loading={isBusy}
             onLock={() => runAction(lockRound)}
             onSettle={() => runAction(settleRound)}
-            onPriceChange={(id, price) => runAction(() => overrideSelectionPrice(id, price))}
             onCopyBreakdown={() => runAction(copyBreakdown)}
             onBackToOrders={() => setView("order")}
           />

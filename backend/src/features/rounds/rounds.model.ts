@@ -9,6 +9,10 @@ export interface RoundItem {
   name: string;
   description?: string;
   priceCents: number;
+  storeId?: string;
+  storeName?: string;
+  section?: string;
+  imageUrl?: string;
 }
 
 export interface RoundOrder {
@@ -66,6 +70,10 @@ export const RoundSchema = new Schema<RoundDocument>(
           name: { type: String, required: true },
           description: String,
           priceCents: { type: Number, required: true, default: 0 },
+          storeId: String,
+          storeName: String,
+          section: String,
+          imageUrl: String,
         },
       ],
       default: [],

@@ -44,6 +44,10 @@ const itemSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   priceCents: z.number().int().min(0),
+  storeId: z.string().optional(),
+  storeName: z.string().optional(),
+  section: z.string().optional(),
+  imageUrl: z.string().optional(),
 });
 
 export const getRounds = async (req: Request, res: Response) => {

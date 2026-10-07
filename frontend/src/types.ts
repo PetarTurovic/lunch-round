@@ -16,6 +16,7 @@ export interface Session {
 
 export interface Participant {
   _id: string;
+  participantId?: string;
   name: string;
   isOrganizer?: boolean;
   userId?: string;
@@ -82,7 +83,30 @@ export interface Settlement {
 }
 
 export interface RoundOrder {
+  participantId?: string;
+  name?: string;
+  quantities?: Record<string, number>;
+  joinedAt?: string;
+  updatedAt?: string;
+  userId?: string | null;
   totalCents?: number;
+}
+
+export interface RoundItem {
+  id: string;
+  name: string;
+  description?: string;
+  priceCents: number;
+  storeId?: string;
+  storeName?: string;
+  section?: string;
+  imageUrl?: string;
+}
+
+export interface RoundBill {
+  settledAt?: string;
+  totalCents: number;
+  people: { name: string; amountCents: number }[];
 }
 
 export interface Round {
@@ -95,7 +119,12 @@ export interface Round {
   shortlist: StoreSummary[];
   participants: Participant[];
   selections: Selection[];
-  orders?: RoundOrder[];
+  orders: RoundOrder[];
+  items: RoundItem[];
+  venue?: string;
+  organizer?: { participantId?: string; name?: string; userId?: string };
+  feeCents?: number;
+  bill?: RoundBill | null;
   settlement?: Settlement;
   settlementView?: Settlement;
   createdAt?: string;
