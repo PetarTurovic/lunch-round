@@ -90,17 +90,60 @@ const audit = (roundId: Types.ObjectId, orderId: Types.ObjectId | null, actorPar
 export const calculateRoundSettlement = (round: { currency: string; orders: EmbeddedOrder[]; participants: EmbeddedParticipant[] }) => {
   if (!round.orders.length || !round.participants.length) return null;
   const participantIds = round.participants.map((p) => p._id);
-  const orders = round.orders.map((o) => settleOrder({
-    orderId: o._id, storeName: o.storeSnapshot.name, subtotalCents: o.subtotalCents,
-    adjustments: o.adjustments, participantIds, selections: o.items.filter((i) => i.status === "active"),
-  }));
+  const orders = round.orders.map((o) =>
+    settleOrder({
+      orderId: o._id,
+      storeName: o.storeSnapshot.name,
+      subtotalCents: o.subtotalCents,
+      adjustments: o.adjustments,
+      participantIds,
+      selections: o.items.filter((i) => i.status === "active"),
+    }),
+  );
+
   const totalCents = orders.reduce((sum, o) => sum + o.totalCents, 0);
+
+  // Aggregate participant item & adjustment totals directly
+  const totalsByParticipant = new Map<string, { items: number; adjustments: number; paid: number }>();
+  for (const p of round.participants) {
+    totalsByParticipant.set(p._id.toString(), { items: 0, adjustments: 0, paid: 0 });
+  }
+
+  for (const o of orders) {
+    for (const line of o.perParticipant) {
+      const summary = totalsByParticipant.get(line.participantId.toString());
+      if (summary) {
+        summary.items += line.itemsCents;
+        summary.adjustments += line.adjustmentsCents;
+      }
+    }
+  }
+
+  for (const o of round.orders) {
+    for (const pay of o.payments || []) {
+      const summary = totalsByParticipant.get(pay.participantId.toString());
+      if (summary) {
+        summary.paid += pay.amountCents;
+      }
+    }
+  }
+
   const perParticipant: RoundSettlementLine[] = round.participants.map((p) => {
-    const items = orders.reduce((s, o) => s + (o.perParticipant.find((l) => l.participantId.equals(p._id))?.itemsCents ?? 0), 0);
-    const adjustments = orders.reduce((s, o) => s + (o.perParticipant.find((l) => l.participantId.equals(p._id))?.adjustmentsCents ?? 0), 0);
-    const paid = round.orders.reduce((s, o) => s + (o.payments || []).filter((pay) => pay.participantId.equals(p._id)).reduce((ps, pay) => ps + pay.amountCents, 0), 0);
-    return { participantId: p._id, participantName: p.name, orderId: null, orderLabel: "Round Total", itemsCents: items, adjustmentsCents: adjustments, totalCents: items + adjustments, paidCents: paid, outstandingCents: Math.max(0, items + adjustments - paid) };
+    const summary = totalsByParticipant.get(p._id.toString()) || { items: 0, adjustments: 0, paid: 0 };
+    const total = summary.items + summary.adjustments;
+    return {
+      participantId: p._id,
+      participantName: p.name,
+      orderId: null,
+      orderLabel: "Round Total",
+      itemsCents: summary.items,
+      adjustmentsCents: summary.adjustments,
+      totalCents: total,
+      paidCents: summary.paid,
+      outstandingCents: Math.max(0, total - summary.paid),
+    };
   });
+
   return { totalCents, orders, perParticipant };
 };
 

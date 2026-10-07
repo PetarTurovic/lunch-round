@@ -53,42 +53,55 @@ export const allocate = (totalAmount: number, weights: number[]): number[] => {
   const roundedShares = exactShares.map(Math.floor);
   let remainder = totalAmount - roundedShares.reduce((sum, s) => sum + s, 0);
 
-  exactShares
-    .map((exact, index) => ({ index, fraction: exact - Math.floor(exact) }))
-    .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
-    .forEach(({ index }) => {
-      if (remainder-- > 0) roundedShares[index]++;
-    });
+  const order = weights
+    .map((_, i) => ({ i, frac: exactShares[i] - roundedShares[i] }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+
+  for (let k = 0; k < remainder; k++) {
+    roundedShares[order[k].i]++;
+  }
 
   return roundedShares;
 };
 
 export const settleOrder = (input: SettlementOrderInput): SettledOrder => {
-  const participantIds = input.participantIds;
-  const items = participantIds.map((id) =>
-    input.selections
-      .filter((s) => s.participantId.toString() === id.toString())
-      .reduce((sum, s) => sum + s.unitPriceCents * s.quantity, 0),
-  );
-  const itemsCents = items.reduce((sum, amount) => sum + amount, 0);
+  const { participantIds, selections, adjustments: orderAdjustments } = input;
 
-  const adjustments = participantIds.map(() => 0);
-  for (const adjustment of input.adjustments) {
-    const weights = adjustment.allocation === "equal" ? participantIds.map(() => 1) : items;
-    const sign = adjustmentSign(adjustment);
-    allocate(adjustment.amountCents, weights).forEach((share, index) => {
-      adjustments[index] += sign * share;
-    });
+  // 1. Sum item cents per participant in a single pass O(S)
+  const itemMap = new Map<string, number>();
+  for (const sel of selections) {
+    const key = sel.participantId.toString();
+    itemMap.set(key, (itemMap.get(key) ?? 0) + sel.unitPriceCents * sel.quantity);
   }
 
-  const perParticipant = participantIds.map((participantId, index) => ({
-    participantId,
-    itemsCents: items[index],
-    adjustmentsCents: adjustments[index],
-    totalCents: items[index] + adjustments[index],
-  }));
+  const items = participantIds.map((id) => itemMap.get(id.toString()) ?? 0);
+  const itemsCents = items.reduce((sum, amount) => sum + amount, 0);
 
-  const adjustmentsCents = adjustments.reduce((sum, amount) => sum + amount, 0);
+  // 2. Allocate each adjustment
+  const adjustments = participantIds.map(() => 0);
+  for (const adj of orderAdjustments) {
+    const weights = adj.allocation === "equal" ? participantIds.map(() => 1) : items;
+    const sign = adjustmentSign(adj);
+    const shares = allocate(adj.amountCents, weights);
+    for (let i = 0; i < shares.length; i++) {
+      adjustments[i] += sign * shares[i];
+    }
+  }
+
+  // 3. Build per-participant summary
+  let adjustmentsCents = 0;
+  const perParticipant = participantIds.map((participantId, index) => {
+    const itemAmt = items[index];
+    const adjAmt = adjustments[index];
+    adjustmentsCents += adjAmt;
+    return {
+      participantId,
+      itemsCents: itemAmt,
+      adjustmentsCents: adjAmt,
+      totalCents: itemAmt + adjAmt,
+    };
+  });
+
   return {
     orderId: input.orderId,
     storeName: input.storeName,
@@ -106,14 +119,18 @@ export const settleRound = (
 ): SettledRound => {
   const settledOrders = orders.map(settleOrder);
   const totalCents = settledOrders.reduce((sum, order) => sum + order.totalCents, 0);
-  const perParticipant = new Map(participantIds.map((id) => [id.toString(), { itemsCents: 0, adjustmentsCents: 0, totalCents: 0 }]));
+  const perParticipant = new Map(
+    participantIds.map((id) => [id.toString(), { itemsCents: 0, adjustmentsCents: 0, totalCents: 0 }]),
+  );
 
   for (const order of settledOrders) {
     for (const line of order.perParticipant) {
-      const summary = perParticipant.get(line.participantId.toString())!;
-      summary.itemsCents += line.itemsCents;
-      summary.adjustmentsCents += line.adjustmentsCents;
-      summary.totalCents += line.totalCents;
+      const summary = perParticipant.get(line.participantId.toString());
+      if (summary) {
+        summary.itemsCents += line.itemsCents;
+        summary.adjustmentsCents += line.adjustmentsCents;
+        summary.totalCents += line.totalCents;
+      }
     }
   }
 
