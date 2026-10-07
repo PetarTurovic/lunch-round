@@ -388,6 +388,15 @@ function App() {
     setSession((current) => ({ ...current, ...changes }));
   }
 
+  async function startNewRound(): Promise<void> {
+    updateSession({ roundSlug: "", participantToken: "" });
+    setRoundInUrl("");
+    setRound(null);
+    setParticipant(null);
+    setIsOrganizer(false);
+    setView("setup");
+  }
+
   async function authenticate({ mode, name, email, password }: AuthDetails): Promise<void> {
     const path = mode === "register" ? "/auth/register" : "/auth/login";
     const body = mode === "register" ? { name, email, password } : { email, password };
@@ -658,11 +667,7 @@ function App() {
             onCopyLink={() => runAction(copyRoundLink)}
             onLockOrders={() => runAction(lockRound)}
             onNavigateOrder={() => setView("order")}
-            onNewRound={() => runAction(async () => {
-              updateSession({ roundSlug: "", participantToken: "" });
-              setRoundInUrl("");
-              setRound(null);
-            })}
+            onNewRound={() => runAction(startNewRound)}
             loading={isBusy}
           />
         )}
@@ -674,6 +679,7 @@ function App() {
             orders={orders}
             currentOrder={currentOrder}
             participant={participant}
+            isOrganizer={isOrganizer}
             locked={locked}
             hasDeadline={hasDeadline}
             timeLabel={timeLabel}
@@ -683,6 +689,7 @@ function App() {
             onJoin={(name) => runAction(() => joinRound(name))}
             onChangeQuantity={(item, quantity) => runAction(() => changeQuantity(item, quantity))}
             onNavigateBill={() => setView("ledger")}
+            onNewRound={() => runAction(startNewRound)}
           />
         )}
 

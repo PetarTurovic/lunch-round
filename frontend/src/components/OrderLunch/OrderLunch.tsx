@@ -26,6 +26,7 @@ interface OrderLunchProps {
   orders: ParticipantOrder[];
   currentOrder: ParticipantOrder;
   participant: Participant | null;
+  isOrganizer: boolean;
   locked: boolean;
   hasDeadline: boolean;
   timeLabel: string;
@@ -35,6 +36,7 @@ interface OrderLunchProps {
   onJoin: (name: string) => Promise<void>;
   onChangeQuantity: (item: OrderMenuItem, quantity: number) => Promise<void>;
   onNavigateBill: () => void;
+  onNewRound: () => Promise<void>;
 }
 
 function OrderLunch({
@@ -43,6 +45,7 @@ function OrderLunch({
   orders,
   currentOrder,
   participant,
+  isOrganizer,
   locked,
   hasDeadline,
   timeLabel,
@@ -51,7 +54,8 @@ function OrderLunch({
   loading,
   onJoin,
   onChangeQuantity,
-  onNavigateBill
+  onNavigateBill,
+  onNewRound
 }: OrderLunchProps) {
   const [name, setName] = useState("");
   const selectedItems = items.filter((item) => safeNumber(currentOrder.quantities[item.id]) > 0);
@@ -117,6 +121,16 @@ function OrderLunch({
               <p className="mb-0 text-[10px] leading-relaxed text-amber-900">
                 It was created before restaurant menus were added to rounds. Ask the organizer to create a new round so the selected restaurants and dishes are included.
               </p>
+              {isOrganizer && (
+                <button
+                  className="mt-3 min-h-9 rounded-lg bg-lunch-dark px-4 text-[10px] font-semibold text-white hover:bg-green-950 disabled:opacity-50"
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void onNewRound()}
+                >
+                  Start a new round with menus
+                </button>
+              )}
             </Card>
           )}
           <Card className="flex items-center gap-3 p-4 max-sm:flex-wrap">
