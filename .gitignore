@@ -28,3 +28,4 @@ Thumbs.db
 
 # Local database backups
 .backups/
+backend/api.http
