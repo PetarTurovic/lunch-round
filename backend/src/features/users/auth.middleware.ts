@@ -4,11 +4,11 @@ import { Types, type HydratedDocument } from "mongoose";
 import config from "../../config";
 import { UnauthorizedError, ForbiddenError, NotFoundError } from "../../shared/errors";
 import { User } from "./users.model";
-import { Round, type RoundDocument, type EmbeddedParticipant } from "../rounds/rounds.model";
+import { Round, type RoundDocument, type RoundOrder } from "../rounds/rounds.model";
 import { hashToken } from "../participants/participants.service";
 
 export interface AuthUserPayload { id: string; email: string; name: string }
-export interface AuthenticatedParticipant extends EmbeddedParticipant { isOrganizer: boolean }
+export interface AuthenticatedParticipant extends RoundOrder { isOrganizer: boolean }
 
 declare global {
   namespace Express {
@@ -73,16 +73,16 @@ export const getParticipantFromRequest = async (req: Request) => {
   const round = await getRoundFromRequest(req);
   const rawToken = (req.headers["x-participant-token"] as string) || (req.query.participantToken as string) || "";
 
-  let participant: EmbeddedParticipant | null = null;
+  let participant: RoundOrder | null = null;
   if (rawToken) {
-    participant = round.participants.find((p: EmbeddedParticipant) => p.tokenHash === hashToken(rawToken)) ?? null;
+    participant = round.orders.find((p: RoundOrder) => p.tokenHash === hashToken(rawToken)) ?? null;
   }
   if (!participant && req.user) {
-    participant = round.participants.find((p: EmbeddedParticipant) => p.userId && p.userId.toString() === req.user!.id) ?? null;
+    participant = round.orders.find((p: RoundOrder) => p.userId && p.userId.toString() === req.user!.id) ?? null;
   }
 
   const isOrganizer = participant
-    ? round.organizer.participantId.equals(participant._id)
+    ? round.organizer.participantId.equals(participant.participantId)
     : Boolean(req.user && round.organizer.userId?.toString() === req.user.id);
 
   const authParticipant: AuthenticatedParticipant | null = participant

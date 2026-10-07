@@ -50,7 +50,7 @@ export const claimParticipantSessionService = async (userId: Types.ObjectId, rou
   const p = await resolveParticipantService(roundId, token);
   if (!p) throw new NotFoundError("Participant session not found or invalid token");
   if (p.userId && !p.userId.equals(userId)) throw new ConflictError("This participant is already claimed by another user");
-  const updated = await claimParticipantService(roundId, p._id, userId);
-  await Round.updateOne({ _id: roundId, "organizer.participantId": p._id, "organizer.userId": null }, { $set: { "organizer.userId": userId } });
+  const updated = await claimParticipantService(roundId, p.participantId, userId);
+  await Round.updateOne({ _id: roundId, "organizer.participantId": p.participantId, "organizer.userId": null }, { $set: { "organizer.userId": userId } });
   return updated;
 };

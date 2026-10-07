@@ -21,14 +21,9 @@ router.delete("/:idOrSlug", rMid, reqOrg, c.deleteRoundController);
 router.post("/:idOrSlug/join", rMid, optionalAuth, c.joinRoundController);
 router.get("/:idOrSlug/me", rMid, pMid, c.getMyParticipantController);
 
-router.post("/:idOrSlug/selections", rMid, reqPart, c.addSelectionController);
-router.patch("/:idOrSlug/selections/:selectionId", rMid, reqPart, c.updateSelectionController);
-router.delete("/:idOrSlug/selections/:selectionId", rMid, reqPart, c.removeSelectionController);
-router.post("/:idOrSlug/selections/:selectionId/price", rMid, reqOrg, c.overridePriceController);
-
-router.post("/:idOrSlug/orders/:orderId/adjustments", rMid, reqOrg, c.addAdjustmentController);
-router.delete("/:idOrSlug/orders/:orderId/adjustments/:adjustmentId", rMid, reqOrg, c.removeAdjustmentController);
-router.post("/:idOrSlug/orders/:orderId/payments", rMid, reqOrg, c.recordPaymentController);
+// Simplified item & order operations matching frontend
+router.put("/:idOrSlug/items", rMid, reqOrg, c.updateRoundItemsController);
+router.post("/:idOrSlug/order", rMid, reqPart, c.saveOrderController);
 
 router.post("/:idOrSlug/lock", rMid, reqOrg, c.lockRoundController);
 router.post("/:idOrSlug/settle", rMid, reqOrg, c.settleRoundController);
