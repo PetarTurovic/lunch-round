@@ -72,13 +72,11 @@ export const removeSelectionController = async (req: Request, res: Response) => 
   res.json(await roundSvc.removeSelectionService(req.round!._id, toObjectId(req.params.selectionId), req.participant!._id, Boolean(req.isOrganizer)));
 };
 
-export const overrideSelectionPriceController = async (req: Request, res: Response) => {
+export const overridePriceController = async (req: Request, res: Response) => {
   const { unitPriceCents } = z.object({ unitPriceCents: z.number().int().min(0) }).parse(req.body);
   const updatedPrice = await roundSvc.overrideSelectionPriceInRoundService(req.round!._id, toObjectId(req.params.selectionId), req.participant!._id, unitPriceCents);
   res.json({ unitPriceCents: updatedPrice });
 };
-
-export const overridePriceController = overrideSelectionPriceController;
 
 export const getMyParticipantController = async (req: Request, res: Response) => {
   res.json({ participant: req.participant ?? null, isOrganizer: Boolean(req.isOrganizer) });

@@ -104,10 +104,3 @@ export const getStoreMenuSummaryService = async (idOrSlug: string, itemsPerSecti
   if (!store) throw new NotFoundError("Store");
   return { ...store, menu: { sections: store.sections || [] } };
 };
-
-export const getStoresMenuSummaryService = async (storeIds: string[], itemsPerSection = 3) => {
-  if (!storeIds?.length) return [];
-  const stores = await Store.aggregate([{ $match: { _id: { $in: storeIds } } }, { $project: getMenuSummaryProjection(itemsPerSection) }]);
-  const byId = Object.fromEntries(stores.map((s) => [s._id.toString(), s]));
-  return storeIds.map((id) => byId[id]).filter(Boolean);
-};

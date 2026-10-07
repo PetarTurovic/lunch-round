@@ -10,10 +10,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "type-check": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "verify:settlement": "tsx scripts/verify-settlement.ts",
-    "smoke:orders": "tsx scripts/smoke-order-domain.ts",
-    "smoke:api": "tsx scripts/smoke-api-auth.ts"
+    "format": "prettier --write \"src/**/*.ts\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
