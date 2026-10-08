@@ -24,6 +24,7 @@ import type {
 } from "./types";
 
 const SESSION_KEY = "lunchround-session-v1";
+const sharedRoundLink = new URLSearchParams(window.location.search).has("round");
 const navItems: { id: View; label: string; icon: string }[] = [
   { id: "setup", label: "Organize lunch", icon: "◫" },
   { id: "order", label: "Order lunch", icon: "⌑" },
@@ -159,8 +160,9 @@ function menuItemsForRound(round: Round): OrderMenuItem[] {
 
 function App() {
   const [session, setSession] = useState<Session>(readSession);
-  const [showLogin, setShowLogin] = useState(() => !session.authToken);
-  const [view, setView] = useState<View>("setup");
+  const [showLogin, setShowLogin] = useState(() => !session.authToken && !sharedRoundLink);
+  const [isSharedRoundView, setIsSharedRoundView] = useState(sharedRoundLink);
+  const [view, setView] = useState<View>(sharedRoundLink ? "order" : "setup");
   const [round, setRound] = useState<Round | null>(null);
   const [participant, setParticipant] = useState<Participant | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
@@ -394,6 +396,7 @@ function App() {
     setRound(null);
     setParticipant(null);
     setIsOrganizer(false);
+    setIsSharedRoundView(false);
     setView("setup");
   }
 
@@ -474,22 +477,17 @@ function App() {
     setIsOrganizer(Boolean(me.isOrganizer));
   }
 
-  async function changeQuantity(item: OrderMenuItem, nextQuantity: number): Promise<void> {
+  async function submitOrder(quantities: Record<string, number>): Promise<void> {
     if (!participant) throw new Error("Join this round before adding menu items.");
     if (locked) throw new Error("This lunch round is locked.");
     if (!round) throw new Error("Load a lunch round before adding menu items.");
-    const currentQuantities = round.orders.find((order) =>
-      String(order.participantId) === String(participant._id)
-    )?.quantities || {};
-    const quantities = { ...currentQuantities };
-    if (nextQuantity > 0) quantities[item.id] = nextQuantity;
-    else delete quantities[item.id];
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/order`, {
       method: "POST",
       participantToken: session.participantToken,
       body: jsonBody({ quantities })
     });
     await refreshRound();
+    notify("Your order has been submitted.");
   }
 
   async function lockRound(): Promise<void> {
@@ -610,7 +608,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-canvas font-sans text-ink">
-      <aside className="fixed inset-y-0 left-0 z-10 flex w-60 flex-col border-r border-stone-200 bg-white px-4 py-6 max-sm:inset-x-0 max-sm:inset-y-auto max-sm:bottom-0 max-sm:h-[60px] max-sm:w-full max-sm:flex-row max-sm:items-center max-sm:justify-center max-sm:border-r-0 max-sm:border-t max-sm:px-2 max-sm:py-1">
+      {!isSharedRoundView && <aside className="fixed inset-y-0 left-0 z-10 flex w-60 flex-col border-r border-stone-200 bg-white px-4 py-6 max-sm:inset-x-0 max-sm:inset-y-auto max-sm:bottom-0 max-sm:h-[60px] max-sm:w-full max-sm:flex-row max-sm:items-center max-sm:justify-center max-sm:border-r-0 max-sm:border-t max-sm:px-2 max-sm:py-1">
         <a className="flex items-center gap-2 px-2 font-display text-xl font-extrabold tracking-tight text-ink no-underline max-sm:hidden" href="#" aria-label="LunchRound home" onClick={(event) => { event.preventDefault(); setView("setup"); }}>
           <span className="grid h-8 w-8 place-items-center rounded-xl rounded-bl-sm bg-lunch text-base text-white">L</span>
           <span>Lunch Round<span className="text-lunch-orange">.</span></span>
@@ -634,13 +632,13 @@ function App() {
             )}
           </div>
         </div>
-      </aside>
+      </aside>}
 
-      <main className="ml-60 min-h-screen px-8 pb-14 max-sm:ml-0 max-sm:px-4 max-sm:pb-20">
-        <header className="flex h-[72px] items-center justify-between border-b border-stone-200">
+      <main className={isSharedRoundView ? "min-h-screen px-4 pb-8 sm:px-8" : "ml-60 min-h-screen px-8 pb-14 max-sm:ml-0 max-sm:px-4 max-sm:pb-20"}>
+        {!isSharedRoundView && <header className="flex h-[72px] items-center justify-between border-b border-stone-200">
           <div className="flex items-center gap-3 text-[10px] text-stone-400"><span>Workspace</span><span>/</span><strong className="font-semibold text-stone-600">{pageNames[view]}</strong></div>
           <div className="flex items-center gap-3 text-[10px] text-stone-500"><span>{dateText}</span><span className="h-5 w-px bg-stone-200" /><span className="rounded-full border border-stone-200 px-2 py-1">{round ? "Connected to database" : "Backend connected"}</span></div>
-        </header>
+        </header>}
 
         {roundError && <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-800" role="alert">{roundError}<button className="ml-3 bg-transparent font-bold" type="button" onClick={() => setRoundError("")} aria-label="Dismiss error">×</button></div>}
 
@@ -672,7 +670,7 @@ function App() {
           />
         )}
 
-        {view === "order" && (
+        {(isSharedRoundView || view === "order") && (
           <OrderLunch
             round={round}
             items={visibleItems}
@@ -680,6 +678,7 @@ function App() {
             currentOrder={currentOrder}
             participant={participant}
             isOrganizer={isOrganizer}
+            standalone={isSharedRoundView}
             locked={locked}
             hasDeadline={hasDeadline}
             timeLabel={timeLabel}
@@ -687,7 +686,7 @@ function App() {
             minutes={minutes}
             loading={isBusy}
             onJoin={(name) => runAction(() => joinRound(name))}
-            onChangeQuantity={(item, quantity) => runAction(() => changeQuantity(item, quantity))}
+            onSubmitOrder={(quantities) => runAction(() => submitOrder(quantities))}
             onNavigateBill={() => setView("ledger")}
             onNewRound={() => runAction(startNewRound)}
           />

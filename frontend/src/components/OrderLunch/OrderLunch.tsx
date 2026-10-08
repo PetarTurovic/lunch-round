@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { euro, initials, safeNumber } from "../../utils";
 import type { OrderMenuItem, Participant, ParticipantOrder, Round } from "../../types";
 
@@ -27,6 +27,7 @@ interface OrderLunchProps {
   currentOrder: ParticipantOrder;
   participant: Participant | null;
   isOrganizer: boolean;
+  standalone: boolean;
   locked: boolean;
   hasDeadline: boolean;
   timeLabel: string;
@@ -34,7 +35,7 @@ interface OrderLunchProps {
   minutes: number;
   loading: boolean;
   onJoin: (name: string) => Promise<void>;
-  onChangeQuantity: (item: OrderMenuItem, quantity: number) => Promise<void>;
+  onSubmitOrder: (quantities: Record<string, number>) => Promise<void>;
   onNavigateBill: () => void;
   onNewRound: () => Promise<void>;
 }
@@ -46,6 +47,7 @@ function OrderLunch({
   currentOrder,
   participant,
   isOrganizer,
+  standalone,
   locked,
   hasDeadline,
   timeLabel,
@@ -53,14 +55,32 @@ function OrderLunch({
   minutes,
   loading,
   onJoin,
-  onChangeQuantity,
+  onSubmitOrder,
   onNavigateBill,
   onNewRound
 }: OrderLunchProps) {
   const [name, setName] = useState("");
-  const selectedItems = items.filter((item) => safeNumber(currentOrder.quantities[item.id]) > 0);
+  const [draftQuantities, setDraftQuantities] = useState<Record<string, number>>({});
+  const persistedQuantities = currentOrder.quantities || {};
+  const persistedQuantitiesKey = JSON.stringify(persistedQuantities);
+  useEffect(() => {
+    setDraftQuantities(persistedQuantities);
+  }, [currentOrder.id, round?.slug, persistedQuantitiesKey]);
+
+  const selectedItems = items.filter((item) => safeNumber(draftQuantities[item.id]) > 0);
   const orderTotal = selectedItems.reduce((sum, item) =>
-    sum + safeNumber(currentOrder.quantities[item.id]) * safeNumber(item.price), 0);
+    sum + safeNumber(draftQuantities[item.id]) * safeNumber(item.price), 0);
+  const hasOrderChanges = [...new Set([...Object.keys(persistedQuantities), ...Object.keys(draftQuantities)])]
+    .some((itemId) => safeNumber(persistedQuantities[itemId]) !== safeNumber(draftQuantities[itemId]));
+
+  function updateQuantity(itemId: string, quantity: number) {
+    setDraftQuantities((current) => {
+      const next = { ...current };
+      if (quantity > 0) next[itemId] = quantity;
+      else delete next[itemId];
+      return next;
+    });
+  }
 
   if (!round) {
     return (
@@ -87,7 +107,7 @@ function OrderLunch({
         <div>
           <div className="mb-3 flex items-center gap-2 text-[9px] font-bold tracking-widest text-stone-500"><span className="h-1.5 w-1.5 rounded-full bg-lunch-orange" />YOUR TEAM LUNCH</div>
           <h1 className="mb-2 font-display text-3xl font-bold tracking-tight max-sm:text-2xl">{round.title} <span className="text-lunch">menu.</span></h1>
-          <p className="mb-0 text-xs leading-relaxed text-stone-500">{locked ? `Ordering closed at ${timeLabel}. Orders are read-only.` : "Add your picks below. Your order is saved to the shared round."}</p>
+          <p className="mb-0 text-xs leading-relaxed text-stone-500">{locked ? `Ordering closed at ${timeLabel}. Orders are read-only.` : "Choose your dishes, then submit your order below the menu."}</p>
         </div>
         <span className={`inline-flex min-h-7 items-center gap-2 rounded-full border px-3 text-[9px] font-semibold ${locked ? "border-stone-200 bg-stone-100 text-stone-600" : "border-green-200 bg-green-50 text-green-800"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ring-4 ${locked ? "bg-stone-500 ring-stone-200" : "bg-green-500 ring-green-100"}`} />
@@ -136,29 +156,39 @@ function OrderLunch({
           <Card className="flex items-center gap-3 p-4 max-sm:flex-wrap">
             <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-green-50 text-2xl" aria-hidden="true">♧</div>
             <div className="min-w-0"><span className="mb-1 block text-[8px] font-bold tracking-widest text-stone-500">RESTAURANTS IN THIS ROUND</span><h2 className="mb-1 font-display text-sm font-bold">{round.shortlist?.length || 0} selected</h2><p className="mb-0 text-[9px] text-stone-500">Choose dishes from any restaurant below.</p></div>
-            <div className="ml-auto rounded-lg bg-green-50 px-3 py-2 text-green-800 max-sm:ml-14 max-sm:w-full"><strong className="block text-[9px]">{locked ? `Closed at ${timeLabel}` : hasDeadline ? `Locks in ${hours ? `${hours} hr ${minutes} min` : `${minutes} min`}` : "No closing time set"}</strong><small className="text-[8px] text-stone-500">{locked ? "Orders are read-only" : "Your changes are shared with the team"}</small></div>
+            <div className="ml-auto rounded-lg bg-green-50 px-3 py-2 text-green-800 max-sm:ml-14 max-sm:w-full"><strong className="block text-[9px]">{locked ? `Closed at ${timeLabel}` : hasDeadline ? `Locks in ${hours ? `${hours} hr ${minutes} min` : `${minutes} min`}` : "No closing time set"}</strong><small className="text-[8px] text-stone-500">{locked ? "Orders are read-only" : "Submit your order to share it with the team"}</small></div>
           </Card>
 
           <Card>
             <div className="mb-3"><h2 className="mb-1 font-display text-sm font-bold">The menu</h2><p className="mb-0 text-[9px] text-stone-500">{items.length} available dishes across the selected restaurants.</p></div>
             <div className="grid gap-2">
               {items.map((item, index) => {
-                const quantity = safeNumber(currentOrder.quantities[item.id]);
+                const quantity = safeNumber(draftQuantities[item.id]);
                 return (
                   <div className={`flex min-h-[68px] items-center gap-2 rounded-lg border border-stone-200 p-2.5 sm:gap-3 ${locked ? "bg-stone-50" : "bg-white"}`} key={item.id}>
                     <DishAvatar name={item.name} index={index} />
                     <div className="min-w-0 flex-1"><strong className="mb-1 block text-[10px] text-stone-800">{item.name}</strong><small className="block truncate text-[9px] text-stone-500">{[item.storeName, item.section, item.description].filter(Boolean).join(" · ")}</small></div>
                     <span className="whitespace-nowrap text-[10px] font-semibold text-stone-700">{euro(item.price, item.currency)}</span>
                     <div className="flex items-center gap-1 rounded-lg border border-stone-200 p-1" aria-label={`${item.name} quantity`}>
-                      <button className="grid h-6 w-6 place-items-center rounded-md bg-green-50 text-base text-green-800 hover:bg-green-100 disabled:bg-stone-50 disabled:text-stone-300" type="button" disabled={locked || loading || !participant || quantity === 0} aria-label={`Remove one ${item.name}`} onClick={() => onChangeQuantity(item, quantity - 1)}>−</button>
+                      <button className="grid h-6 w-6 place-items-center rounded-md bg-green-50 text-base text-green-800 hover:bg-green-100 disabled:bg-stone-50 disabled:text-stone-300" type="button" disabled={locked || loading || !participant || quantity === 0} aria-label={`Remove one ${item.name}`} onClick={() => updateQuantity(item.id, quantity - 1)}>−</button>
                       <strong className="min-w-3 text-center text-[10px]">{quantity}</strong>
-                      <button className="grid h-6 w-6 place-items-center rounded-md bg-green-50 text-base text-green-800 hover:bg-green-100 disabled:bg-stone-50 disabled:text-stone-300" type="button" disabled={locked || loading || !participant} aria-label={`Add one ${item.name}`} onClick={() => onChangeQuantity(item, quantity + 1)}>+</button>
+                      <button className="grid h-6 w-6 place-items-center rounded-md bg-green-50 text-base text-green-800 hover:bg-green-100 disabled:bg-stone-50 disabled:text-stone-300" type="button" disabled={locked || loading || !participant} aria-label={`Add one ${item.name}`} onClick={() => updateQuantity(item.id, quantity + 1)}>+</button>
                     </div>
                   </div>
                 );
               })}
               {!items.length && <p className="mb-0 py-3 text-[10px] text-stone-500">No available menu items were found for this round.</p>}
             </div>
+            {participant && (
+              <button
+                className="mt-4 flex min-h-11 w-full items-center justify-center rounded-lg bg-lunch-dark px-4 text-xs font-semibold text-white hover:bg-green-950 disabled:cursor-not-allowed disabled:opacity-50"
+                type="button"
+                disabled={locked || loading || !hasOrderChanges}
+                onClick={() => void onSubmitOrder(draftQuantities)}
+              >
+                {loading ? "Submitting order…" : "Submit order"}
+              </button>
+            )}
           </Card>
         </div>
 
@@ -167,13 +197,13 @@ function OrderLunch({
             <div className="flex items-center justify-between border-b border-stone-100 pb-3"><h2 className="mb-0 font-display text-sm font-bold">Your order</h2><span className="text-lg text-green-800" aria-hidden="true">▱</span></div>
             <div className="grid gap-3 py-4">
               {selectedItems.map((item) => (
-                <div className="flex justify-between gap-3 text-[9px] text-stone-600" key={item.id}><span>{safeNumber(currentOrder.quantities[item.id])} × {item.name}</span><strong className="whitespace-nowrap text-stone-800">{euro(safeNumber(currentOrder.quantities[item.id]) * safeNumber(item.price), item.currency)}</strong></div>
+                <div className="flex justify-between gap-3 text-[9px] text-stone-600" key={item.id}><span>{safeNumber(draftQuantities[item.id])} × {item.name}</span><strong className="whitespace-nowrap text-stone-800">{euro(safeNumber(draftQuantities[item.id]) * safeNumber(item.price), item.currency)}</strong></div>
               ))}
               {!selectedItems.length && <p className="mb-0 py-2 text-center text-[9px] leading-relaxed text-stone-400">Your order is empty. Pick something from the menu.</p>}
             </div>
             <div className="flex items-center justify-between border-t border-stone-100 py-3 text-[10px] text-stone-600"><span>Estimated total</span><strong className="font-display text-lg text-lunch-dark">{euro(orderTotal, round.currency)}</strong></div>
-            <p className="mb-0 text-[8px] text-stone-400">Your changes are saved as you add or remove dishes.</p>
-            <button className="mt-4 flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white text-[10px] font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50" type="button" disabled={!participant || !selectedItems.length} onClick={onNavigateBill}>View final bill <span aria-hidden="true">→</span></button>
+            <p className="mb-0 text-[8px] text-stone-400">{hasOrderChanges ? "Your selections are not shared until you submit your order." : "Your submitted order is shared with the team."}</p>
+            {!standalone && <button className="mt-4 flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white text-[10px] font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50" type="button" disabled={!participant || !selectedItems.length} onClick={onNavigateBill}>View final bill <span aria-hidden="true">→</span></button>}
           </Card>
           <p className="flex gap-2 px-1 text-[9px] leading-relaxed text-stone-500"><span className="text-green-800" aria-hidden="true">♧</span> Your organizer and team can see updates to this order.</p>
         </aside>

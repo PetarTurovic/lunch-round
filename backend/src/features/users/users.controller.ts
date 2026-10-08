@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { Types } from "mongoose";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { ConflictError, NotFoundError, UnauthorizedError } from "../../errors";
 import { signUserToken } from "../../auth.middleware";
@@ -17,6 +18,10 @@ const hashPassword = async (password: string): Promise<string> => {
 };
 
 const verifyPassword = async (password: string, storedHash: string): Promise<boolean> => {
+  if (/^\$2[aby]\$/.test(storedHash)) {
+    return bcrypt.compare(password, storedHash);
+  }
+
   const [salt, key] = storedHash.split(":");
   if (!salt || !key) return false;
   const keyBuffer = Buffer.from(key, "hex");
@@ -55,6 +60,11 @@ export const login = async (req: Request, res: Response) => {
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
     throw new UnauthorizedError("Invalid email or password");
+  }
+
+  if (/^\$2[aby]\$/.test(user.passwordHash)) {
+    user.passwordHash = await hashPassword(password);
+    await user.save();
   }
 
   res.json(authResponse(user));
