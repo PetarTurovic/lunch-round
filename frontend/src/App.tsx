@@ -6,9 +6,10 @@ import OrderLunch from "./components/OrderLunch/OrderLunch";
 import OrganizeLunch from "./components/OrganizeLunch/OrganizeLunch";
 import Settings from "./components/Settings/Settings";
 import { apiRequest, jsonBody } from "./backendClient";
-import { euro, safeNumber } from "./utils";
+import { euro, safeNumber, calculateDistanceKm } from "./utils";
 import type {
   AuthDetails,
+  GeoLocation,
   HistoryRound,
   OrderMenuItem,
   Participant,
@@ -201,6 +202,24 @@ function App() {
     }
   });
 
+  const [location, setLocation] = useState<GeoLocation | null>(() => {
+    try {
+      const saved = localStorage.getItem("lunchround-location");
+      return saved ? JSON.parse(saved) as GeoLocation : { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" };
+    } catch {
+      return { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" };
+    }
+  });
+
+  const [radiusKm, setRadiusKm] = useState<number>(() => {
+    try {
+      const val = Number(localStorage.getItem("lunchround-radius"));
+      return val > 0 ? val : 5;
+    } catch {
+      return 5;
+    }
+  });
+
   // Persist session
   useEffect(() => {
     try {
@@ -236,6 +255,22 @@ function App() {
       localStorage.setItem("lunchround-duration", String(defaultDuration));
     } catch {}
   }, [defaultDuration]);
+
+  useEffect(() => {
+    try {
+      if (location) {
+        localStorage.setItem("lunchround-location", JSON.stringify(location));
+      } else {
+        localStorage.removeItem("lunchround-location");
+      }
+    } catch {}
+  }, [location]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-radius", String(radiusKm));
+    } catch {}
+  }, [radiusKm]);
 
   // Live timer tick
   useEffect(() => {

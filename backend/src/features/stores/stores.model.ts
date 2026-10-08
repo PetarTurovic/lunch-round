@@ -21,6 +21,7 @@ export const StoreSchema = new Schema(
 
 StoreSchema.index({ status: 1 });
 StoreSchema.index({ "location.city": 1, status: 1 });
+StoreSchema.index({ "location.coordinates": "2dsphere" });
 StoreSchema.index({ name: "text", "taxonomy.cuisines": "text" });
 
 export const Store = mongoose.models.Store ?? mongoose.model("Store", StoreSchema);
