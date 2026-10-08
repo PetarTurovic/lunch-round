@@ -6,7 +6,7 @@ import OrderLunch from "./components/OrderLunch/OrderLunch";
 import OrganizeLunch from "./components/OrganizeLunch/OrganizeLunch";
 import Settings from "./components/Settings/Settings";
 import { apiRequest, jsonBody } from "./backendClient";
-import { euro, safeNumber, playChime } from "./utils";
+import { euro, safeNumber } from "./utils";
 import type {
   AuthDetails,
   HistoryRound,
@@ -180,7 +180,6 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [hasPlayedChime, setHasPlayedChime] = useState(false);
 
   // User profile and preferences
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -199,14 +198,6 @@ function App() {
       return val > 0 ? val : 30;
     } catch {
       return 30;
-    }
-  });
-
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("lunchround-sound") !== "false";
-    } catch {
-      return true;
     }
   });
 
@@ -245,12 +236,6 @@ function App() {
       localStorage.setItem("lunchround-duration", String(defaultDuration));
     } catch {}
   }, [defaultDuration]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("lunchround-sound", String(soundEnabled));
-    } catch {}
-  }, [soundEnabled]);
 
   // Live timer tick
   useEffect(() => {
@@ -450,18 +435,6 @@ function App() {
   const dateLabel = closesAt && closesAt.toDateString() === new Date(now).toDateString()
     ? "today"
     : "at the selected time";
-
-  // Audio chime when countdown reaches zero
-  useEffect(() => {
-    if (hasDeadline && closesAt && soundEnabled) {
-      if (closesAt.getTime() <= now && !hasPlayedChime) {
-        playChime();
-        setHasPlayedChime(true);
-      } else if (closesAt.getTime() > now) {
-        setHasPlayedChime(false);
-      }
-    }
-  }, [hasDeadline, closesAt, now, soundEnabled, hasPlayedChime]);
 
   const pageNames: Record<View, string> = {
     setup: "Organize lunch",
@@ -720,7 +693,6 @@ function App() {
       localStorage.removeItem(SESSION_KEY);
       localStorage.removeItem("lunchround-currency");
       localStorage.removeItem("lunchround-duration");
-      localStorage.removeItem("lunchround-sound");
     } catch {}
     setSession({ authToken: "", user: null, roundSlug: "", participantToken: "" });
     setRound(null);
@@ -936,8 +908,6 @@ function App() {
             onCurrencyChange={setCurrency}
             defaultDuration={defaultDuration}
             onDefaultDurationChange={setDefaultDuration}
-            soundEnabled={soundEnabled}
-            onSoundEnabledChange={setSoundEnabled}
             onUpdateUserName={(name) => runAction(() => updateUserProfileName(name))}
             onSignOut={logout}
             onSignIn={() => { setRoundError(""); setShowLogin(true); }}

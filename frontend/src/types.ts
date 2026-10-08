@@ -191,7 +191,6 @@ export interface AppPreferences {
   theme: Theme;
   currency: string;
   defaultDurationMinutes: number;
-  soundEnabled: boolean;
 }
 
 export interface RoundUpdateDetails {
