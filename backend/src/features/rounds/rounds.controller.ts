@@ -237,6 +237,7 @@ export const updateRound = async (req: Request, res: Response) => {
     }).nullable().optional(),
     feeCents: z.number().int().min(0).optional(),
     closesAt: z.coerce.date().nullable().optional(),
+    status: z.enum(["open", "locked", "ordered"]).optional(),
     storeIds: z.array(z.string()).optional(),
     shortlist: z.array(z.any()).optional(),
     items: z.array(itemSchema).optional(),
@@ -250,6 +251,7 @@ export const updateRound = async (req: Request, res: Response) => {
   }
   if (body.feeCents !== undefined) round.feeCents = body.feeCents;
   if (body.closesAt !== undefined) round.closesAt = body.closesAt;
+  if (body.status !== undefined) round.status = body.status;
 
   if (body.items !== undefined) {
     round.items = body.items;
