@@ -56,10 +56,6 @@ function Settings({
     }
   }
 
-  function handleTestChime() {
-    playChime();
-  }
-
   return (
     <section className="mx-auto max-w-4xl pt-9">
       <div className="mb-7">
@@ -222,7 +218,7 @@ function Settings({
             </div>
 
             {/* Default Closing Duration */}
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-100 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h3 className="mb-0.5 text-xs font-semibold text-stone-800">Default ordering window</h3>
                 <p className="mb-0 text-[10px] text-stone-500">Quick preset duration for new rounds.</p>
@@ -239,35 +235,6 @@ function Settings({
                     {mins}m
                   </button>
                 ))}
-              </div>
-            </div>
-
-            {/* Audio Alert */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h3 className="mb-0.5 text-xs font-semibold text-stone-800">Deadline audio chime</h3>
-                <p className="mb-0 text-[10px] text-stone-500">Play a subtle audio tone when the ordering countdown expires.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded-md border border-stone-200 px-2 py-1 text-[9px] text-stone-600 hover:bg-stone-50"
-                  onClick={handleTestChime}
-                  title="Play sample chime"
-                >
-                  ♪ Test sound
-                </button>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={soundEnabled}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${soundEnabled ? "bg-lunch" : "bg-stone-200"}`}
-                  onClick={() => onSoundEnabledChange(!soundEnabled)}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${soundEnabled ? "translate-x-5" : "translate-x-0"}`}
-                  />
-                </button>
               </div>
             </div>
           </div>
