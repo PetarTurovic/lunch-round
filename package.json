@@ -7,6 +7,7 @@
     "dev": "concurrently --kill-others --names \"api,web\" --prefix-colors \"blue.bold,magenta.bold\" \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev --prefix backend",
     "dev:web": "npm run dev --prefix frontend",
+    "start": "npm start --prefix backend",
     "build": "npm run build --prefix backend && npm run build --prefix frontend",
     "type-check": "npm run type-check --prefix backend && npm run type-check --prefix frontend",
     "setup": "npm install && npm run install:packages",
