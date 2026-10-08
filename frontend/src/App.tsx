@@ -584,18 +584,6 @@ function App() {
     notify("Orders unlocked and reopened.");
   }
 
-  async function joinRound(name: string): Promise<void> {
-    if (!round) throw new Error("Load a lunch round before joining.");
-    const result = await apiRequest<{ token: string; participant: Participant }>(`/rounds/${encodeURIComponent(round.slug)}/join`, {
-      method: "POST",
-      token: session.authToken,
-      body: jsonBody({ name })
-    });
-    updateSession({ roundSlug: round.slug, participantToken: result.token });
-    setRoundInUrl(round.slug);
-    await refreshRound();
-    notify(`Joined as ${result.participant.name}.`);
-  }
 
   async function refreshRound(): Promise<void> {
     if (!session.roundSlug) return;
@@ -613,22 +601,54 @@ function App() {
     setIsOrganizer(Boolean(me.isOrganizer));
   }
 
-  async function changeQuantity(item: OrderMenuItem, nextQuantity: number): Promise<void> {
-    if (!participant) throw new Error("Join this round before adding menu items.");
+  async function submitOrder(name: string, quantities: Record<string, number>): Promise<void> {
     if (locked) throw new Error("This lunch round is locked.");
-    if (!round) throw new Error("Load a lunch round before adding menu items.");
-    const currentQuantities = round.orders.find((order) =>
-      String(order.participantId) === String(participant._id)
-    )?.quantities || {};
-    const quantities = { ...currentQuantities };
-    if (nextQuantity > 0) quantities[item.id] = nextQuantity;
-    else delete quantities[item.id];
+    if (!round) throw new Error("Load a lunch round before placing an order.");
+
+    let token = session.participantToken;
+    let participantId = participant?._id;
+
+    // If not a participant in this round yet, join first
+    if (!token || !participantId) {
+      const orderName = (name || session.user?.name || "").trim();
+      if (!orderName) throw new Error("Please enter your name to submit your order.");
+      const result = await apiRequest<{ token: string; participant: Participant }>(
+        `/rounds/${encodeURIComponent(round.slug)}/join`,
+        {
+          method: "POST",
+          token: session.authToken,
+          body: jsonBody({ name: orderName })
+        }
+      );
+      token = result.token;
+      participantId = String(result.participant.participantId || result.participant._id);
+      updateSession({ roundSlug: round.slug, participantToken: token });
+      setRoundInUrl(round.slug);
+    }
+
+    // Save order quantities
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/order`, {
       method: "POST",
-      participantToken: session.participantToken,
+      token: session.authToken,
+      participantToken: token,
       body: jsonBody({ quantities })
     });
+
     await refreshRound();
+    notify("Your lunch order has been submitted!");
+  }
+
+  async function clearOrder(): Promise<void> {
+    if (!participant || !round) return;
+    if (locked) throw new Error("This lunch round is locked.");
+    await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/order`, {
+      method: "POST",
+      token: session.authToken,
+      participantToken: session.participantToken,
+      body: jsonBody({ quantities: {} })
+    });
+    await refreshRound();
+    notify("Your order has been cleared.");
   }
 
   async function lockRound(): Promise<void> {
@@ -868,8 +888,8 @@ function App() {
             minutes={minutes}
             loading={isBusy}
             user={session.user}
-            onJoin={(name) => runAction(() => joinRound(name))}
-            onChangeQuantity={(item, quantity) => runAction(() => changeQuantity(item, quantity))}
+            onSubmitOrder={(name, quantities) => runAction(() => submitOrder(name, quantities))}
+            onClearOrder={() => runAction(clearOrder)}
             onNavigateBill={() => setView("ledger")}
             onNewRound={() => runAction(startNewRound)}
             onRefresh={() => runAction(refreshRound)}

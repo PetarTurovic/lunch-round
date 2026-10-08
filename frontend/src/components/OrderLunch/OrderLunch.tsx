@@ -1,4 +1,4 @@
-import { useState, useMemo, type FormEvent, type ReactNode } from "react";
+import { useState, useMemo, useEffect, type FormEvent, type ReactNode } from "react";
 import { euro, initials, safeNumber } from "../../utils";
 import type { OrderMenuItem, Participant, ParticipantOrder, Round, User } from "../../types";
 
@@ -42,8 +42,8 @@ interface OrderLunchProps {
   minutes: number;
   loading: boolean;
   user?: User | null;
-  onJoin: (name: string) => Promise<void>;
-  onChangeQuantity: (item: OrderMenuItem, quantity: number) => Promise<void>;
+  onSubmitOrder: (name: string, quantities: Record<string, number>) => Promise<void>;
+  onClearOrder: () => Promise<void>;
   onNavigateBill: () => void;
   onNewRound: () => Promise<void>;
   onRefresh?: () => Promise<void>;
@@ -66,22 +66,41 @@ function OrderLunch({
   minutes,
   loading,
   user,
-  onJoin,
-  onChangeQuantity,
+  onSubmitOrder,
+  onClearOrder,
   onNavigateBill,
   onNewRound,
   onRefresh
 }: OrderLunchProps) {
-  const [name, setName] = useState(user?.name || "");
-  const [isChangingName, setIsChangingName] = useState(false);
+  // Staged local quantities for immediate, responsive clicks
+  const [stagedQuantities, setStagedQuantities] = useState<Record<string, number>>(() => currentOrder.quantities || {});
+  const [name, setName] = useState<string>(() => participant?.name || user?.name || "");
+  const [isRenaming, setIsRenaming] = useState(false);
+
+  // Search, filter, and sorting
   const [search, setSearch] = useState("");
   const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>("all");
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortOption>("default");
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("your-order");
   const [refreshing, setRefreshing] = useState(false);
+  const [justSubmitted, setJustSubmitted] = useState(false);
 
   const currency = round?.currency || "EUR";
+
+  // Synchronize staged quantities when the backend order updates
+  useEffect(() => {
+    setStagedQuantities(currentOrder.quantities || {});
+  }, [currentOrder.quantities]);
+
+  // Synchronize name
+  useEffect(() => {
+    if (participant?.name) {
+      setName(participant.name);
+    } else if (user?.name && !name) {
+      setName(user.name);
+    }
+  }, [participant?.name, user?.name]);
 
   // Available sections across all items
   const availableSections = useMemo(() => {
@@ -92,16 +111,41 @@ function OrderLunch({
     return Array.from(set).sort();
   }, [items]);
 
-  // Selected items for the current participant
-  const selectedItems = useMemo(
-    () => items.filter((item) => safeNumber(currentOrder.quantities[item.id]) > 0),
-    [items, currentOrder]
+  // Staged items list
+  const stagedItems = useMemo(() => {
+    return items
+      .filter((item) => safeNumber(stagedQuantities[item.id]) > 0)
+      .map((item) => ({
+        ...item,
+        quantity: safeNumber(stagedQuantities[item.id])
+      }));
+  }, [items, stagedQuantities]);
+
+  const totalStagedCount = useMemo(() => {
+    return stagedItems.reduce((sum, item) => sum + item.quantity, 0);
+  }, [stagedItems]);
+
+  const stagedFoodTotal = useMemo(() => {
+    return stagedItems.reduce((sum, item) => sum + item.quantity * safeNumber(item.price), 0);
+  }, [stagedItems]);
+
+  // Check if participant has an already submitted order
+  const hasSubmittedOrder = Boolean(
+    participant &&
+    Object.values(currentOrder.quantities || {}).some((qty) => safeNumber(qty) > 0)
   );
 
-  const orderFoodTotal = useMemo(
-    () => selectedItems.reduce((sum, item) => sum + safeNumber(currentOrder.quantities[item.id]) * safeNumber(item.price), 0),
-    [selectedItems, currentOrder]
-  );
+  // Check if staged quantities differ from backend submitted quantities
+  const hasUnsavedChanges = useMemo(() => {
+    const saved = currentOrder.quantities || {};
+    const allIds = new Set([...Object.keys(stagedQuantities), ...Object.keys(saved)]);
+    for (const id of allIds) {
+      if (safeNumber(stagedQuantities[id]) !== safeNumber(saved[id])) {
+        return true;
+      }
+    }
+    return false;
+  }, [stagedQuantities, currentOrder.quantities]);
 
   // Filter and sort items
   const filteredItems = useMemo(() => {
@@ -128,6 +172,20 @@ function OrderLunch({
     });
   }, [items, search, selectedStoreFilter, selectedSectionFilter, sortBy]);
 
+  // Local stepper adjustments: FAST & NON-BLOCKING
+  function handleStep(itemId: string, nextQty: number) {
+    if (locked) return;
+    setStagedQuantities((prev) => {
+      const next = { ...prev };
+      if (nextQty > 0) {
+        next[itemId] = nextQty;
+      } else {
+        delete next[itemId];
+      }
+      return next;
+    });
+  }
+
   async function handleRefresh() {
     if (!onRefresh) return;
     setRefreshing(true);
@@ -138,14 +196,31 @@ function OrderLunch({
     }
   }
 
-  async function handleClearAll() {
+  async function handleSubmit(e?: FormEvent) {
+    if (e) e.preventDefault();
+    if (locked) return;
+
+    const orderName = (name || participant?.name || user?.name || "").trim();
+    if (!orderName) {
+      alert("Please enter your name to submit your order.");
+      return;
+    }
+
+    await onSubmitOrder(orderName, stagedQuantities);
+    setJustSubmitted(true);
+    setIsRenaming(false);
+    window.setTimeout(() => setJustSubmitted(false), 3000);
+  }
+
+  async function handleClear() {
     if (!window.confirm("Clear all items from your order?")) return;
-    for (const item of selectedItems) {
-      await onChangeQuantity(item, 0);
+    setStagedQuantities({});
+    if (hasSubmittedOrder) {
+      await onClearOrder();
     }
   }
 
-  // Calculate team orders view
+  // Calculate team orders summary
   const teamOrdersSummary = useMemo(() => {
     return orders.map((order) => {
       const picks: { item: OrderMenuItem; quantity: number }[] = [];
@@ -178,17 +253,17 @@ function OrderLunch({
             YOUR TEAM LUNCH
           </div>
           <h1 className="mb-2 font-display text-3xl font-bold tracking-tight max-sm:text-2xl">
-            Join a lunch <span className="text-lunch">round.</span>
+            Order <span className="text-lunch">lunch.</span>
           </h1>
           <p className="mb-0 text-xs leading-relaxed text-stone-500">
-            Open a shared round link to see its menu and place your order.
+            Open a shared round link to see available restaurant dishes and place your order.
           </p>
         </div>
         <Card>
           <p className="mb-0 text-xs leading-relaxed text-stone-600">
             {window.location.search.includes("round=")
-              ? "Loading the linked lunch round from the backend…"
-              : "No lunch round is selected. Ask the organizer for their round link, or create a new round from Organize lunch."}
+              ? "Loading the linked lunch round from the database…"
+              : "No lunch round is selected. Open a link from your organizer or create a round from Organize lunch."}
           </p>
         </Card>
       </section>
@@ -197,12 +272,12 @@ function OrderLunch({
 
   return (
     <section className="mx-auto max-w-6xl pt-9">
-      {/* Header */}
+      {/* Top Header */}
       <div className="mb-7 flex items-end justify-between gap-5 max-sm:flex-col max-sm:items-start">
         <div>
           <div className="mb-3 flex items-center gap-2 text-[9px] font-bold tracking-widest text-stone-500">
             <span className="h-1.5 w-1.5 rounded-full bg-lunch-orange" />
-            SHARED TEAM MENU
+            TEAM ORDERING
           </div>
           <h1 className="mb-2 font-display text-3xl font-bold tracking-tight max-sm:text-2xl">
             {round.title} <span className="text-lunch">menu.</span>
@@ -210,9 +285,10 @@ function OrderLunch({
           <p className="mb-0 text-xs leading-relaxed text-stone-500">
             {locked
               ? `Ordering closed at ${timeLabel}. Orders are locked in read-only mode.`
-              : "Choose dishes from the selected restaurants. Your order updates live."}
+              : "Select your dishes from the restaurants below. When ready, submit your order to the organizer."}
           </p>
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
           {onRefresh && (
             <button
@@ -221,7 +297,7 @@ function OrderLunch({
               disabled={refreshing}
               onClick={handleRefresh}
             >
-              {refreshing ? "Refreshing…" : "↻ Refresh orders"}
+              {refreshing ? "Refreshing…" : "↻ Refresh menu"}
             </button>
           )}
           <span
@@ -237,93 +313,38 @@ function OrderLunch({
         </div>
       </div>
 
-      {/* Participant Joining / Identity Banner */}
-      {!participant || isChangingName ? (
-        <Card className="mb-5 max-w-xl">
-          <h2 className="mb-1 font-display text-sm font-bold text-ink">
-            {participant ? "Switch your name" : "Join this round"}
-          </h2>
-          <p className="mb-3 text-[10px] text-stone-500">
-            Enter the name your colleagues and organizer will recognize.
-          </p>
-          <form
-            className="flex flex-wrap gap-2"
-            onSubmit={(event: FormEvent<HTMLFormElement>) => {
-              event.preventDefault();
-              void onJoin(name.trim()).then(() => setIsChangingName(false));
-            }}
+      {/* Locked Warning Banner */}
+      {locked && (
+        <div className="mb-5 flex items-center justify-between rounded-xl border border-stone-200 bg-stone-100 p-4 text-xs text-stone-700">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🔒</span>
+            <span><strong>Orders are locked.</strong> The organizer is finalizing the bill. Menu selections are now read-only.</span>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg bg-white border border-stone-300 px-3 py-1 text-[10px] font-semibold text-stone-700 hover:bg-stone-50"
+            onClick={onNavigateBill}
           >
-            <input
-              className="h-9 min-w-0 flex-1 rounded-lg border border-stone-200 bg-transparent px-3 text-xs outline-none focus:border-green-400"
-              autoComplete="name"
-              maxLength={100}
-              required
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Jordan Smith"
-            />
-            <button
-              className="min-h-9 rounded-lg bg-lunch-dark px-4 text-xs font-semibold text-white shadow-sm hover:bg-green-950 disabled:opacity-50"
-              type="submit"
-              disabled={loading || locked || !name.trim()}
-            >
-              {loading ? "Joining…" : participant ? "Update name" : "Join round"}
-            </button>
-            {isChangingName && (
-              <button
-                type="button"
-                className="h-9 rounded-lg border border-stone-200 px-3 text-xs text-stone-600 hover:bg-stone-50"
-                onClick={() => setIsChangingName(false)}
-              >
-                Cancel
-              </button>
-            )}
-          </form>
-        </Card>
-      ) : (
-        <Card className="mb-5 flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-purple-100 font-display text-xs font-bold text-purple-800">
-              {initials(participant.name)}
-            </span>
-            <div>
-              <span className="block text-[8px] font-bold tracking-widest text-stone-400">ORDERING AS</span>
-              <strong className="block text-xs text-ink">{participant.name}</strong>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="text-[9px] font-semibold text-stone-500 hover:text-stone-800"
-              onClick={() => {
-                setName(participant.name);
-                setIsChangingName(true);
-              }}
-            >
-              Change name
-            </button>
-            <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[9px] text-stone-600">
-              {orders.length} team {orders.length === 1 ? "member" : "members"}
-            </span>
-          </div>
-        </Card>
+            View final bill →
+          </button>
+        </div>
       )}
 
-      {/* Main Grid: Menu Dishes + Sidebar */}
+      {/* Main Layout: Menu Dishes + Order Tray */}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        {/* LEFT COLUMN: Menu Cards */}
         <div className="grid gap-3">
-          {/* Missing items fallback */}
+          {/* Missing items alert */}
           {!items.length && (
             <Card className="border-amber-200 bg-amber-50">
               <h2 className="mb-1 font-display text-sm font-bold text-amber-950">This round has no menu items</h2>
               <p className="mb-0 text-xs leading-relaxed text-amber-900">
-                The organizer created this round before restaurant menus were attached. Ask them to create a new round from the catalogue.
+                The organizer created this round without menu items attached.
               </p>
               {isOrganizer && (
                 <button
-                  className="mt-3 min-h-9 rounded-lg bg-lunch-dark px-4 text-xs font-semibold text-white hover:bg-green-950 shadow-sm"
+                  className="mt-3 min-h-9 rounded-lg bg-lunch-dark px-4 text-xs font-semibold text-white hover:bg-green-950"
                   type="button"
-                  disabled={loading}
                   onClick={() => void onNewRound()}
                 >
                   Start a new round with menus
@@ -336,7 +357,7 @@ function OrderLunch({
           {items.length > 0 && (
             <Card className="p-4">
               <div className="grid gap-3">
-                {/* Search input */}
+                {/* Live Search input */}
                 <div className="relative">
                   <input
                     type="text"
@@ -440,14 +461,14 @@ function OrderLunch({
 
             <div className="grid gap-2.5">
               {filteredItems.map((item, index) => {
-                const quantity = safeNumber(currentOrder.quantities[item.id]);
-                const isInCart = quantity > 0;
+                const quantity = safeNumber(stagedQuantities[item.id]);
+                const isInTray = quantity > 0;
 
                 return (
                   <div
                     className={`flex min-h-[72px] items-center gap-3 rounded-lg border p-3 transition ${
-                      isInCart
-                        ? "border-green-300 bg-green-50/40"
+                      isInTray
+                        ? "border-green-400 bg-green-50/50"
                         : locked
                         ? "border-stone-200 bg-stone-50"
                         : "border-stone-200 bg-white hover:border-stone-300"
@@ -458,9 +479,9 @@ function OrderLunch({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <strong className="text-xs text-stone-800">{item.name}</strong>
-                        {isInCart && (
+                        {isInTray && (
                           <span className="rounded-full bg-green-100 px-2 py-0.5 text-[8px] font-bold text-green-800">
-                            {quantity} in your order
+                            {quantity} in your tray
                           </span>
                         )}
                       </div>
@@ -473,24 +494,24 @@ function OrderLunch({
                       {euro(item.price, item.currency || currency)}
                     </span>
 
-                    {/* Stepper */}
-                    <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1" aria-label={`${item.name} quantity`}>
+                    {/* Stepper: ALWAYS responsive and snappy */}
+                    <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1">
                       <button
-                        className="grid h-6 w-6 place-items-center rounded-md bg-white text-sm font-bold text-stone-700 shadow-sm hover:bg-stone-100 disabled:opacity-40 disabled:shadow-none"
+                        className="grid h-7 w-7 place-items-center rounded-md bg-white text-base font-bold text-stone-700 shadow-sm hover:bg-stone-100 disabled:opacity-30 disabled:shadow-none"
                         type="button"
-                        disabled={locked || loading || !participant || quantity === 0}
+                        disabled={locked || quantity === 0}
                         aria-label={`Remove one ${item.name}`}
-                        onClick={() => onChangeQuantity(item, quantity - 1)}
+                        onClick={() => handleStep(item.id, quantity - 1)}
                       >
                         −
                       </button>
                       <strong className="min-w-4 text-center text-xs text-stone-800">{quantity}</strong>
                       <button
-                        className="grid h-6 w-6 place-items-center rounded-md bg-white text-sm font-bold text-stone-700 shadow-sm hover:bg-stone-100 disabled:opacity-40 disabled:shadow-none"
+                        className="grid h-7 w-7 place-items-center rounded-md bg-white text-base font-bold text-stone-700 shadow-sm hover:bg-stone-100 disabled:opacity-30 disabled:shadow-none"
                         type="button"
-                        disabled={locked || loading || !participant}
+                        disabled={locked}
                         aria-label={`Add one ${item.name}`}
-                        onClick={() => onChangeQuantity(item, quantity + 1)}
+                        onClick={() => handleStep(item.id, quantity + 1)}
                       >
                         ＋
                       </button>
@@ -501,15 +522,15 @@ function OrderLunch({
 
               {!filteredItems.length && items.length > 0 && (
                 <p className="py-8 text-center text-xs text-stone-400">
-                  No menu items matched your search or category filters.
+                  No dishes match your search or filter.
                 </p>
               )}
             </div>
           </Card>
         </div>
 
-        {/* SIDEBAR: Order Summary & Team Orders Tabs */}
-        <aside className="grid gap-3">
+        {/* RIGHT COLUMN: Order Tray & Submission Panel */}
+        <aside className="sticky top-6 grid gap-3">
           <Card>
             {/* Tabs for Sidebar */}
             <div className="flex border-b border-stone-100 pb-2 mb-3">
@@ -522,7 +543,7 @@ function OrderLunch({
                 }`}
                 onClick={() => setSidebarTab("your-order")}
               >
-                Your Order ({selectedItems.length})
+                Your Order ({totalStagedCount})
               </button>
               <button
                 type="button"
@@ -537,55 +558,117 @@ function OrderLunch({
               </button>
             </div>
 
-            {/* TAB 1: YOUR ORDER */}
+            {/* TAB 1: YOUR ORDER TRAY */}
             {sidebarTab === "your-order" && (
               <div>
-                <div className="divide-y divide-stone-100 py-2 max-h-80 overflow-y-auto">
-                  {selectedItems.map((item) => {
-                    const qty = safeNumber(currentOrder.quantities[item.id]);
-                    return (
-                      <div className="flex items-center justify-between gap-2 py-2.5 text-xs text-stone-700" key={item.id}>
-                        <div className="min-w-0 flex-1">
-                          <strong className="block truncate text-stone-800">{item.name}</strong>
-                          <span className="text-[9px] text-stone-400">{euro(item.price, currency)} each</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            className="h-5 w-5 rounded bg-stone-100 text-xs hover:bg-stone-200 disabled:opacity-40"
-                            disabled={locked || loading}
-                            onClick={() => onChangeQuantity(item, qty - 1)}
-                          >
-                            −
-                          </button>
-                          <strong className="text-xs">{qty}</strong>
-                          <button
-                            type="button"
-                            className="h-5 w-5 rounded bg-stone-100 text-xs hover:bg-stone-200 disabled:opacity-40"
-                            disabled={locked || loading}
-                            onClick={() => onChangeQuantity(item, qty + 1)}
-                          >
-                            +
-                          </button>
-                        </div>
-                        <strong className="font-display text-xs text-stone-800">
-                          {euro(qty * safeNumber(item.price), currency)}
-                        </strong>
-                      </div>
-                    );
-                  })}
+                {/* Order Status Feedback */}
+                {justSubmitted && (
+                  <div className="mb-3 rounded-lg border border-green-200 bg-green-50 p-2.5 text-xs text-green-900 animate-fade-in">
+                    <strong>✓ Order submitted successfully!</strong>
+                    <p className="mb-0 text-[10px] text-green-700 mt-0.5">Your picks are saved with the team round.</p>
+                  </div>
+                )}
 
-                  {!selectedItems.length && (
+                {hasSubmittedOrder && !hasUnsavedChanges && !justSubmitted && (
+                  <div className="mb-3 rounded-lg border border-green-200 bg-green-50/70 p-2.5 text-xs text-green-900">
+                    <span className="font-semibold">✓ Order placed with organizer</span>
+                    <p className="mb-0 text-[10px] text-green-700 mt-0.5">You can update your items anytime before orders close.</p>
+                  </div>
+                )}
+
+                {hasUnsavedChanges && hasSubmittedOrder && (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+                    <span className="font-semibold">● You have unsaved changes</span>
+                    <p className="mb-0 text-[10px] text-amber-700 mt-0.5">Click "Save Order Changes" below to update your picks.</p>
+                  </div>
+                )}
+
+                {/* Identity / Ordering As Section */}
+                <div className="mb-3 rounded-lg bg-stone-50 p-2.5 border border-stone-100">
+                  {participant && !isRenaming ? (
+                    <div className="flex items-center justify-between text-xs">
+                      <div>
+                        <span className="block text-[8px] font-bold tracking-widest text-stone-400">ORDERING AS</span>
+                        <strong className="text-stone-800">{participant.name}</strong>
+                      </div>
+                      {!locked && (
+                        <button
+                          type="button"
+                          className="text-[9px] font-semibold text-stone-500 hover:text-stone-800"
+                          onClick={() => {
+                            setName(participant.name);
+                            setIsRenaming(true);
+                          }}
+                        >
+                          Change name
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid gap-1">
+                      <label className="text-[9px] font-bold tracking-widest text-stone-400" htmlFor="tray-name">
+                        YOUR NAME
+                      </label>
+                      <input
+                        id="tray-name"
+                        type="text"
+                        className="h-8 rounded-lg border border-stone-200 bg-white px-2.5 text-xs outline-none focus:border-green-400"
+                        placeholder="Enter your name (e.g. Alex Morgan)"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                        maxLength={100}
+                      />
+                      <span className="text-[8px] text-stone-400">Your name will appear next to your dishes on the bill.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Staged Items List */}
+                <div className="divide-y divide-stone-100 max-h-72 overflow-y-auto">
+                  {stagedItems.map((item) => (
+                    <div className="flex items-center justify-between gap-2 py-2.5 text-xs text-stone-700" key={item.id}>
+                      <div className="min-w-0 flex-1">
+                        <strong className="block truncate text-stone-800">{item.name}</strong>
+                        <span className="text-[9px] text-stone-400">{euro(item.price, currency)} each</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="h-6 w-6 rounded bg-stone-100 text-xs font-bold hover:bg-stone-200 disabled:opacity-40"
+                          disabled={locked}
+                          onClick={() => handleStep(item.id, item.quantity - 1)}
+                        >
+                          −
+                        </button>
+                        <strong className="min-w-3 text-center text-xs">{item.quantity}</strong>
+                        <button
+                          type="button"
+                          className="h-6 w-6 rounded bg-stone-100 text-xs font-bold hover:bg-stone-200 disabled:opacity-40"
+                          disabled={locked}
+                          onClick={() => handleStep(item.id, item.quantity + 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <strong className="font-display text-xs text-stone-800 min-w-14 text-right">
+                        {euro(item.quantity * safeNumber(item.price), currency)}
+                      </strong>
+                    </div>
+                  ))}
+
+                  {!stagedItems.length && (
                     <p className="py-6 text-center text-xs text-stone-400">
-                      Your order is empty. Pick dishes from the menu to get started.
+                      Your tray is empty. Tap ＋ on dishes from the menu to build your order.
                     </p>
                   )}
                 </div>
 
+                {/* Subtotals & Submit Button */}
                 <div className="border-t border-stone-100 pt-3">
                   <div className="flex items-center justify-between text-xs text-stone-600 mb-1">
-                    <span>Food Subtotal</span>
-                    <strong>{euro(orderFoodTotal, currency)}</strong>
+                    <span>Food Subtotal ({totalStagedCount} items)</span>
+                    <strong>{euro(stagedFoodTotal, currency)}</strong>
                   </div>
 
                   {round.feeCents ? (
@@ -595,38 +678,78 @@ function OrderLunch({
                     </div>
                   ) : null}
 
-                  <div className="flex items-center justify-between border-t border-stone-100 pt-2 text-sm font-bold text-ink">
-                    <span>Estimated Total</span>
-                    <strong className="font-display text-base text-lunch-dark">
-                      {euro(orderFoodTotal, currency)}
+                  <div className="flex items-center justify-between border-t border-stone-100 pt-2 text-sm font-bold text-ink mb-3">
+                    <span>Your Total</span>
+                    <strong className="font-display text-lg text-lunch-dark">
+                      {euro(stagedFoodTotal, currency)}
                     </strong>
                   </div>
 
-                  {selectedItems.length > 0 && !locked && (
+                  {/* Primary Order Action Button */}
+                  {!locked ? (
                     <button
                       type="button"
-                      className="mt-2 text-[9px] text-stone-400 hover:text-red-600"
-                      onClick={handleClearAll}
+                      disabled={loading || totalStagedCount === 0 || (!participant && !name.trim())}
+                      className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-lunch-dark px-4 text-xs font-semibold text-white shadow-sm hover:bg-green-950 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={handleSubmit}
                     >
-                      Clear my order
+                      {loading
+                        ? "Submitting order…"
+                        : hasSubmittedOrder
+                        ? hasUnsavedChanges
+                          ? `Save Order Changes (${totalStagedCount} items)`
+                          : `✓ Order Placed (${totalStagedCount} items)`
+                        : `Submit Order (${totalStagedCount} items · ${euro(stagedFoodTotal, currency)})`}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="min-h-10 w-full rounded-lg bg-stone-200 text-xs font-semibold text-stone-500 cursor-not-allowed"
+                      disabled
+                    >
+                      Orders locked
                     </button>
                   )}
 
-                  <button
-                    className="mt-3 flex min-h-9 w-full items-center justify-center gap-2 rounded-lg bg-lunch px-4 text-xs font-semibold text-white shadow-sm hover:bg-lunch-dark disabled:opacity-50"
-                    type="button"
-                    disabled={!participant || !selectedItems.length}
-                    onClick={onNavigateBill}
-                  >
-                    View final bill →
-                  </button>
+                  {/* Secondary Actions */}
+                  <div className="mt-2.5 flex items-center justify-between text-[10px]">
+                    {stagedItems.length > 0 && !locked && (
+                      <button
+                        type="button"
+                        className="text-stone-400 hover:text-red-600"
+                        onClick={handleClear}
+                      >
+                        Clear my order
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="ml-auto font-semibold text-stone-600 hover:text-ink"
+                      onClick={onNavigateBill}
+                    >
+                      View group bill totals →
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* TAB 2: TEAM ORDERS */}
+            {/* TAB 2: TEAM ORDERS VIEW */}
             {sidebarTab === "team-orders" && (
               <div className="divide-y divide-stone-100 max-h-80 overflow-y-auto">
+                <div className="flex items-center justify-between pb-2 text-[10px] text-stone-500">
+                  <span>{orders.length} team members joined</span>
+                  {onRefresh && (
+                    <button
+                      type="button"
+                      className="font-semibold text-lunch hover:underline"
+                      onClick={handleRefresh}
+                    >
+                      ↻ Refresh
+                    </button>
+                  )}
+                </div>
+
                 {teamOrdersSummary.map((order, idx) => (
                   <div className="py-2.5" key={order.id || idx}>
                     <div className="flex items-center justify-between mb-1">
@@ -658,10 +781,6 @@ function OrderLunch({
               </div>
             )}
           </Card>
-
-          <div className="rounded-lg bg-stone-50 p-3 text-[9px] leading-relaxed text-stone-500 border border-stone-100">
-            <span className="font-semibold text-stone-700">Live synchronization:</span> Your picks are saved immediately to the shared round database so the organizer and team can see updates in real time.
-          </div>
         </aside>
       </div>
     </section>
