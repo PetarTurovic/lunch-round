@@ -65,7 +65,7 @@ const QR_SPECS: [number, number, number, number][] = [
 export function generateQrMatrix(text: string): boolean[][] {
   const utf8Bytes = Array.from(new TextEncoder().encode(text));
   const spec = QR_SPECS.find(([, , , dataBytes]) => dataBytes - 3 >= utf8Bytes.length) || QR_SPECS[QR_SPECS.length - 1];
-  const [version, totalBytes, ecBytes, dataBytes] = spec;
+  const [version, , ecBytes, dataBytes] = spec;
   const moduleCount = 17 + version * 4;
 
   // Encode data in 8-bit byte mode
