@@ -137,7 +137,19 @@ function OrganizeLunch({
 
   const currency = round?.currency || "EUR";
 
-  const filteredStores = stores;
+  // Sort stores so favorited restaurants appear at the top of the list
+  const filteredStores = useMemo(() => {
+    const favs = user?.favoriteStore || [];
+    if (!favs.length) return stores;
+
+    return [...stores].sort((a, b) => {
+      const aFav = favs.includes(a._id);
+      const bFav = favs.includes(b._id);
+      if (aFav && !bFav) return -1;
+      if (!aFav && bFav) return 1;
+      return 0;
+    });
+  }, [stores, user?.favoriteStore]);
 
   // Selected store objects
   const selectedStoresList = useMemo(() => {
