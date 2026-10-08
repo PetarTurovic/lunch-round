@@ -15,12 +15,21 @@ export const getStores = async (req: Request, res: Response) => {
   const lon = Number(req.query.lon);
   if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
     const radiusKm = Number(req.query.radius) || 10;
-    query["location.coordinates"] = {
-      $near: {
-        $geometry: { type: "Point", coordinates: [lon, lat] },
-        $maxDistance: radiusKm * 1000,
-      },
-    };
+    if (req.query.search) {
+      // MongoDB does not allow $text and $near in the same query; $geoWithin with $centerSphere works seamlessly
+      query["location.coordinates"] = {
+        $geoWithin: {
+          $centerSphere: [[lon, lat], radiusKm / 6378.1],
+        },
+      };
+    } else {
+      query["location.coordinates"] = {
+        $near: {
+          $geometry: { type: "Point", coordinates: [lon, lat] },
+          $maxDistance: radiusKm * 1000,
+        },
+      };
+    }
   }
 
   const stores = await Store.find(query)

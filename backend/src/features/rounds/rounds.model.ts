@@ -54,7 +54,7 @@ export interface RoundDocument {
   title: string;
   venue: string;
   currency: string;
-  location?: { lat: number; lon: number; radiusKm?: number } | null;
+  location?: { lat: number; lon: number; city?: string; cityLabel?: string; radiusKm?: number } | null;
   organizer: {
     participantId: Types.ObjectId;
     name: string;

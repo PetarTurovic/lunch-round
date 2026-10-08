@@ -58,12 +58,32 @@ export interface StoreSummary {
   rating?: number | { value?: number | null } | null;
 }
 
+export interface GeoLocation {
+  lat: number;
+  lon: number;
+  city?: string;
+  cityLabel?: string;
+  label?: string;
+  radiusKm?: number;
+}
+
+export interface StoreLocation {
+  city?: string;
+  cityLabel?: string;
+  country?: string;
+  coordinates?: {
+    type?: string;
+    coordinates?: [number, number]; // [lon, lat]
+  };
+}
+
 export interface Store extends StoreSummary {
   status?: "active" | "inactive";
   menu?: { sections: MenuSection[] };
-  location?: { cityLabel?: string };
+  location?: StoreLocation;
   taxonomy?: { cuisineLabels?: string[] };
   delivery?: { fee?: { amount?: number | null } };
+  distanceKm?: number;
 }
 
 export interface SettlementParticipant {
@@ -124,6 +144,7 @@ export interface Round {
   venue?: string;
   organizer?: { participantId?: string; name?: string; userId?: string };
   feeCents?: number;
+  location?: GeoLocation | null;
   bill?: RoundBill | null;
   settlement?: Settlement;
   settlementView?: Settlement;
@@ -183,6 +204,7 @@ export interface UserProfile {
   id?: string;
   name: string;
   email?: string;
+  location?: GeoLocation | null;
   createdAt?: string;
   stats?: UserStats;
 }
@@ -198,4 +220,5 @@ export interface RoundUpdateDetails {
   closesAt?: string | null;
   feeCents?: number;
   status?: "open" | "locked";
+  location?: GeoLocation | null;
 }

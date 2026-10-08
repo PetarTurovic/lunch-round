@@ -6,9 +6,10 @@ import OrderLunch from "./components/OrderLunch/OrderLunch";
 import OrganizeLunch from "./components/OrganizeLunch/OrganizeLunch";
 import Settings from "./components/Settings/Settings";
 import { apiRequest, jsonBody } from "./backendClient";
-import { euro, safeNumber } from "./utils";
+import { euro, safeNumber, calculateDistanceKm } from "./utils";
 import type {
   AuthDetails,
+  GeoLocation,
   HistoryRound,
   OrderMenuItem,
   Participant,
@@ -202,6 +203,24 @@ function App() {
     }
   });
 
+  const [location, setLocation] = useState<GeoLocation | null>(() => {
+    try {
+      const saved = localStorage.getItem("lunchround-location");
+      return saved ? JSON.parse(saved) as GeoLocation : { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" };
+    } catch {
+      return { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" };
+    }
+  });
+
+  const [radiusKm, setRadiusKm] = useState<number>(() => {
+    try {
+      const val = Number(localStorage.getItem("lunchround-radius"));
+      return val > 0 ? val : 5;
+    } catch {
+      return 5;
+    }
+  });
+
   // Persist session
   useEffect(() => {
     try {
@@ -237,6 +256,22 @@ function App() {
       localStorage.setItem("lunchround-duration", String(defaultDuration));
     } catch {}
   }, [defaultDuration]);
+
+  useEffect(() => {
+    try {
+      if (location) {
+        localStorage.setItem("lunchround-location", JSON.stringify(location));
+      } else {
+        localStorage.removeItem("lunchround-location");
+      }
+    } catch {}
+  }, [location]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-radius", String(radiusKm));
+    } catch {}
+  }, [radiusKm]);
 
   // Live timer tick
   useEffect(() => {
@@ -345,10 +380,26 @@ function App() {
       setStoresLoading(true);
       setStoresError("");
       try {
-        const query = new URLSearchParams({ limit: "24", page: "1" });
+        const query = new URLSearchParams({ limit: "50", page: "1" });
         if (storeSearch.trim()) query.set("search", storeSearch.trim());
+        if (location) {
+          query.set("lat", String(location.lat));
+          query.set("lon", String(location.lon));
+          query.set("radius", String(radiusKm));
+          if (location.city) query.set("city", location.city);
+        }
         const result = await apiRequest<{ stores: Store[] }>(`/stores?${query.toString()}`);
-        if (!cancelled) setStores(result.stores || []);
+        if (!cancelled) {
+          const storesWithDistance = (result.stores || []).map((store) => {
+            if (location && store.location?.coordinates?.coordinates) {
+              const [storeLon, storeLat] = store.location.coordinates.coordinates;
+              const dist = calculateDistanceKm(location.lat, location.lon, storeLat, storeLon);
+              return { ...store, distanceKm: dist };
+            }
+            return store;
+          });
+          setStores(storesWithDistance);
+        }
       } catch (error) {
         if (!cancelled) {
           console.error("Could not search the restaurant catalogue.", error);
@@ -363,7 +414,7 @@ function App() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [session.roundSlug, storeSearch, view]);
+  }, [session.roundSlug, storeSearch, location, radiusKm, view]);
 
   // Load history rounds from backend
   useEffect(() => {
@@ -496,7 +547,17 @@ function App() {
     notify(mode === "register" ? "Account created." : "Signed in.");
   }
 
-  async function createRound({ title, closesAt, feeCents }: { title: string; closesAt: string; feeCents?: number }): Promise<void> {
+  async function createRound({
+    title,
+    closesAt,
+    feeCents,
+    location: roundLoc
+  }: {
+    title: string;
+    closesAt: string;
+    feeCents?: number;
+    location?: GeoLocation | null;
+  }): Promise<void> {
     if (!session.authToken) throw new Error("Sign in before creating a lunch round.");
     if (!selectedStoreIds.length) throw new Error("Choose at least one restaurant.");
     const selectedStores = await Promise.all(selectedStoreIds.map(async (storeId) => {
@@ -518,6 +579,7 @@ function App() {
         }))
     ));
     if (!items.length) throw new Error("The selected restaurants have no available menu items with prices.");
+    const activeLoc = roundLoc !== undefined ? roundLoc : location;
     const result = await apiRequest<{ round: Round; organizerToken: string }>("/rounds", {
       method: "POST",
       token: session.authToken,
@@ -528,7 +590,14 @@ function App() {
         venue: selectedStores.length === 1 ? selectedStores[0].name : "Multiple restaurants",
         items,
         closesAt: closesAt ? new Date(closesAt).toISOString() : undefined,
-        organizerName: session.user?.name
+        organizerName: session.user?.name,
+        location: activeLoc ? {
+          lat: activeLoc.lat,
+          lon: activeLoc.lon,
+          city: activeLoc.city || activeLoc.label,
+          cityLabel: activeLoc.cityLabel || activeLoc.label,
+          radiusKm: activeLoc.radiusKm || radiusKm || 5
+        } : undefined
       })
     });
     const nextSlug = result.round.slug;
@@ -542,11 +611,21 @@ function App() {
 
   async function updateRoundSettings(changes: RoundUpdateDetails): Promise<void> {
     if (!round) return;
+    const body: Record<string, any> = { ...changes };
+    if (changes.location !== undefined) {
+      body.location = changes.location ? {
+        lat: changes.location.lat,
+        lon: changes.location.lon,
+        city: changes.location.city || changes.location.label,
+        cityLabel: changes.location.cityLabel || changes.location.label,
+        radiusKm: changes.location.radiusKm || radiusKm || 5
+      } : null;
+    }
     const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(round.slug)}`, {
       method: "PATCH",
       token: session.authToken,
       participantToken: session.participantToken,
-      body: jsonBody(changes)
+      body: jsonBody(body)
     });
     setRound(normalizeRound(result.round));
     notify("Round settings updated.");
@@ -832,6 +911,10 @@ function App() {
             storesError={storesError}
             storeSearch={storeSearch}
             onStoreSearch={setStoreSearch}
+            location={location}
+            onSelectLocation={setLocation}
+            radiusKm={radiusKm}
+            onRadiusChange={setRadiusKm}
             selectedStoreIds={selectedStoreIds}
             onToggleStore={(id) => setSelectedStoreIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])}
             onSelectMultipleStores={setSelectedStoreIds}
@@ -915,6 +998,10 @@ function App() {
             onCurrencyChange={setCurrency}
             defaultDuration={defaultDuration}
             onDefaultDurationChange={setDefaultDuration}
+            location={location}
+            onLocationChange={setLocation}
+            radiusKm={radiusKm}
+            onRadiusChange={setRadiusKm}
             onUpdateUserName={(name) => runAction(() => updateUserProfileName(name))}
             onSignOut={logout}
             onSignIn={() => { setRoundError(""); setShowLogin(true); }}

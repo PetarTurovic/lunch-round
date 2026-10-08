@@ -134,8 +134,10 @@ export const createRound = async (req: Request, res: Response) => {
     location: z.object({
       lat: z.number(),
       lon: z.number(),
+      city: z.string().optional(),
+      cityLabel: z.string().optional(),
       radiusKm: z.number().min(0.1).max(100).optional(),
-    }).optional(),
+    }).nullable().optional(),
     organizerName: z.string().min(1).max(100).optional(),
     closesAt: z.coerce.date().optional(),
     feeCents: z.number().int().min(0).optional(),
@@ -233,6 +235,8 @@ export const updateRound = async (req: Request, res: Response) => {
     location: z.object({
       lat: z.number(),
       lon: z.number(),
+      city: z.string().optional(),
+      cityLabel: z.string().optional(),
       radiusKm: z.number().min(0.1).max(100).optional(),
     }).nullable().optional(),
     feeCents: z.number().int().min(0).optional(),
