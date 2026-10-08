@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from "react";
-import { playChime } from "../../utils";
 import type { Theme, UserProfile } from "../../types";
 
 interface SettingsProps {
@@ -10,8 +9,6 @@ interface SettingsProps {
   onCurrencyChange: (currency: string) => void;
   defaultDuration: number;
   onDefaultDurationChange: (mins: number) => void;
-  soundEnabled: boolean;
-  onSoundEnabledChange: (enabled: boolean) => void;
   onUpdateUserName?: (name: string) => Promise<void>;
   onSignOut?: () => void;
   onSignIn?: () => void;
@@ -35,8 +32,6 @@ function Settings({
   onCurrencyChange,
   defaultDuration,
   onDefaultDurationChange,
-  soundEnabled,
-  onSoundEnabledChange,
   onUpdateUserName,
   onSignOut,
   onSignIn,
