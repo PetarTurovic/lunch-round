@@ -1,5 +1,5 @@
 import { useState, useMemo, type FormEvent, type ReactNode } from "react";
-import { euro, formatDate, initials, safeNumber, shareLink } from "../../utils";
+import { euro, initials, shareLink } from "../../utils";
 import { generateQrSvg } from "../../qr";
 import type { Participant, Round, Store, User } from "../../types";
 

@@ -6,7 +6,7 @@ import OrderLunch from "./components/OrderLunch/OrderLunch";
 import OrganizeLunch from "./components/OrganizeLunch/OrganizeLunch";
 import Settings from "./components/Settings/Settings";
 import { apiRequest, jsonBody } from "./backendClient";
-import { euro, safeNumber } from "./utils";
+import { euro, safeNumber, playChime } from "./utils";
 import type {
   AuthDetails,
   HistoryRound,
@@ -15,11 +15,13 @@ import type {
   ParticipantOrder,
   RoundItem,
   Round,
+  RoundUpdateDetails,
   Session,
   Store,
   StoreSummary,
   Theme,
   User,
+  UserProfile,
   View
 } from "./types";
 
@@ -178,7 +180,37 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hasPlayedChime, setHasPlayedChime] = useState(false);
 
+  // User profile and preferences
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  const [currency, setCurrency] = useState<string>(() => {
+    try {
+      return localStorage.getItem("lunchround-currency") || "EUR";
+    } catch {
+      return "EUR";
+    }
+  });
+
+  const [defaultDuration, setDefaultDuration] = useState<number>(() => {
+    try {
+      const val = Number(localStorage.getItem("lunchround-duration"));
+      return val > 0 ? val : 30;
+    } catch {
+      return 30;
+    }
+  });
+
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("lunchround-sound") !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  // Persist session
   useEffect(() => {
     try {
       if (session.authToken || session.roundSlug || session.participantToken) {
@@ -192,27 +224,69 @@ function App() {
     }
   }, [session]);
 
+  // Persist preferences
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     try {
       localStorage.setItem("lunchround-theme", theme);
     } catch (error) {
       console.error("Could not save the selected theme.", error);
-      setToast("Your theme preference could not be saved.");
     }
   }, [theme]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-currency", currency);
+    } catch {}
+  }, [currency]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-duration", String(defaultDuration));
+    } catch {}
+  }, [defaultDuration]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-sound", String(soundEnabled));
+    } catch {}
+  }, [soundEnabled]);
+
+  // Live timer tick
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
+  // Toast timeout
   useEffect(() => {
     if (!toast) return undefined;
     const timeout = window.setTimeout(() => setToast(""), 3000);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  // Load user profile & stats from backend
+  useEffect(() => {
+    if (!session.authToken) {
+      setUserProfile(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadUser() {
+      try {
+        const result = await apiRequest<{ user: UserProfile }>("/users/me", { token: session.authToken });
+        if (!cancelled) setUserProfile(result.user);
+      } catch {
+        if (!cancelled && session.user) {
+          setUserProfile({ name: session.user.name, email: session.user.email });
+        }
+      }
+    }
+    loadUser();
+    return () => { cancelled = true; };
+  }, [session.authToken]);
+
+  // Load round data from backend
   useEffect(() => {
     const slug = session.roundSlug;
     if (!slug) {
@@ -236,11 +310,11 @@ function App() {
         let organizer = false;
         let invalidParticipantToken = false;
 
-        if (session.participantToken) {
+        if (session.participantToken || session.authToken) {
           try {
             const me = await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(
               `/rounds/${encodeURIComponent(slug)}/me`,
-              { participantToken: session.participantToken }
+              { token: session.authToken, participantToken: session.participantToken }
             );
             nextParticipant = me.participant
               ? { ...me.participant, _id: String(me.participant.participantId || me.participant._id) }
@@ -275,8 +349,9 @@ function App() {
 
     loadRound();
     return () => { cancelled = true; };
-  }, [session.roundSlug, session.participantToken]);
+  }, [session.roundSlug, session.participantToken, session.authToken]);
 
+  // Load store catalogue when creating a round
   useEffect(() => {
     if (session.roundSlug || view !== "setup") return undefined;
     let cancelled = false;
@@ -284,7 +359,7 @@ function App() {
       setStoresLoading(true);
       setStoresError("");
       try {
-        const query = new URLSearchParams({ limit: "12", page: "1" });
+        const query = new URLSearchParams({ limit: "24", page: "1" });
         if (storeSearch.trim()) query.set("search", storeSearch.trim());
         const result = await apiRequest<{ stores: Store[] }>(`/stores?${query.toString()}`);
         if (!cancelled) setStores(result.stores || []);
@@ -304,11 +379,12 @@ function App() {
     };
   }, [session.roundSlug, storeSearch, view]);
 
+  // Load history rounds from backend
   useEffect(() => {
     if (view !== "history") return undefined;
     if (!session.authToken) {
       setHistoryRounds([]);
-      setHistoryError("Sign in from Organize lunch to see rounds associated with your account.");
+      setHistoryError("");
       return undefined;
     }
     let cancelled = false;
@@ -334,6 +410,7 @@ function App() {
     return () => { cancelled = true; };
   }, [view, session.authToken]);
 
+  // Menu items and order calculations
   const visibleItems = useMemo(() => round ? menuItemsForRound(round) : [], [round]);
   const activeSelections = useMemo(
     () => (round?.selections || []).filter((selection) => selection.status === "active"),
@@ -349,12 +426,14 @@ function App() {
     }
     return { id: person._id, name: person.name, quantities, selectionIds };
   }), [round, visibleItems]);
+
   const currentOrder: ParticipantOrder = orders.find((order) => String(order.id) === String(participant?._id)) || {
     id: "",
     name: participant?.name || "",
     quantities: {},
     selectionIds: {}
   };
+
   const closesAt = round?.closesAt ? new Date(round.closesAt) : null;
   const hasDeadline = Boolean(closesAt && Number.isFinite(closesAt.getTime()));
   const deadlineElapsed = closesAt !== null && closesAt.getTime() <= now;
@@ -364,13 +443,33 @@ function App() {
   const minutes = Math.floor((remaining % 3_600_000) / 60_000);
   const seconds = Math.floor((remaining % 60_000) / 1000);
   const countdown = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+
   const timeLabel = hasDeadline && closesAt
     ? new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(closesAt)
     : "not set";
   const dateLabel = closesAt && closesAt.toDateString() === new Date(now).toDateString()
     ? "today"
     : "at the selected time";
-  const pageNames: Record<View, string> = { setup: "Organize lunch", order: "Order lunch", ledger: "Final bill", history: "History", settings: "Settings" };
+
+  // Audio chime when countdown reaches zero
+  useEffect(() => {
+    if (hasDeadline && closesAt && soundEnabled) {
+      if (closesAt.getTime() <= now && !hasPlayedChime) {
+        playChime();
+        setHasPlayedChime(true);
+      } else if (closesAt.getTime() > now) {
+        setHasPlayedChime(false);
+      }
+    }
+  }, [hasDeadline, closesAt, now, soundEnabled, hasPlayedChime]);
+
+  const pageNames: Record<View, string> = {
+    setup: "Organize lunch",
+    order: "Order lunch",
+    ledger: "Final bill",
+    history: "History",
+    settings: "Settings"
+  };
 
   function notify(message: string): void {
     setToast(message);
@@ -407,7 +506,7 @@ function App() {
     notify(mode === "register" ? "Account created." : "Signed in.");
   }
 
-  async function createRound({ title, closesAt }: { title: string; closesAt: string }): Promise<void> {
+  async function createRound({ title, closesAt, feeCents }: { title: string; closesAt: string; feeCents?: number }): Promise<void> {
     if (!session.authToken) throw new Error("Sign in before creating a lunch round.");
     if (!selectedStoreIds.length) throw new Error("Choose at least one restaurant.");
     const selectedStores = await Promise.all(selectedStoreIds.map(async (storeId) => {
@@ -434,6 +533,8 @@ function App() {
       token: session.authToken,
       body: jsonBody({
         title,
+        currency,
+        feeCents: feeCents || 0,
         venue: selectedStores.length === 1 ? selectedStores[0].name : "Multiple restaurants",
         items,
         closesAt: closesAt ? new Date(closesAt).toISOString() : undefined,
@@ -449,6 +550,40 @@ function App() {
     notify("Lunch round created and saved to the database.");
   }
 
+  async function updateRoundSettings(changes: RoundUpdateDetails): Promise<void> {
+    if (!round) return;
+    const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(round.slug)}`, {
+      method: "PATCH",
+      token: session.authToken,
+      participantToken: session.participantToken,
+      body: jsonBody(changes)
+    });
+    setRound(normalizeRound(result.round));
+    notify("Round settings updated.");
+  }
+
+  async function deleteRound(targetSlug?: string): Promise<void> {
+    const slug = targetSlug || round?.slug;
+    if (!slug) return;
+    await apiRequest(`/rounds/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+      token: session.authToken,
+      participantToken: session.participantToken
+    });
+    if (slug === round?.slug) {
+      await startNewRound();
+    } else {
+      setHistoryRounds((prev) => prev.filter((r) => r.slug !== slug));
+    }
+    notify("Lunch round deleted.");
+  }
+
+  async function unlockRound(): Promise<void> {
+    if (!round) return;
+    await updateRoundSettings({ status: "open" });
+    notify("Orders unlocked and reopened.");
+  }
+
   async function joinRound(name: string): Promise<void> {
     if (!round) throw new Error("Load a lunch round before joining.");
     const result = await apiRequest<{ token: string; participant: Participant }>(`/rounds/${encodeURIComponent(round.slug)}/join`, {
@@ -458,14 +593,18 @@ function App() {
     });
     updateSession({ roundSlug: round.slug, participantToken: result.token });
     setRoundInUrl(round.slug);
+    await refreshRound();
     notify(`Joined as ${result.participant.name}.`);
   }
 
   async function refreshRound(): Promise<void> {
     if (!session.roundSlug) return;
     const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(session.roundSlug)}`);
-    const me = session.participantToken
-      ? await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(`/rounds/${encodeURIComponent(session.roundSlug)}/me`, { participantToken: session.participantToken })
+    const me = (session.participantToken || session.authToken)
+      ? await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(`/rounds/${encodeURIComponent(session.roundSlug)}/me`, {
+          token: session.authToken,
+          participantToken: session.participantToken
+        })
       : { participant: null, isOrganizer: false };
     setRound(normalizeRound(result.round));
     setParticipant(me.participant
@@ -497,18 +636,22 @@ function App() {
     if (!round) throw new Error("Load a lunch round before locking orders.");
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/lock`, {
       method: "POST",
+      token: session.authToken,
       participantToken: session.participantToken
     });
     await refreshRound();
     notify("Orders locked in the database.");
   }
 
-  async function settleRound(): Promise<void> {
+  async function settleRound(customFeeCents?: number): Promise<void> {
     if (!isOrganizer) throw new Error("Only the organizer can finalize this bill.");
     if (!round) throw new Error("Load a lunch round before finalizing the bill.");
+    const body = typeof customFeeCents === "number" ? { feeCents: customFeeCents } : {};
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/settle`, {
       method: "POST",
-      participantToken: session.participantToken
+      token: session.authToken,
+      participantToken: session.participantToken,
+      body: jsonBody(body)
     });
     await refreshRound();
     notify("Final bill saved to the database.");
@@ -540,8 +683,37 @@ function App() {
     }
   }
 
+  async function updateUserProfileName(name: string): Promise<void> {
+    if (!session.authToken) throw new Error("Not signed in");
+    const result = await apiRequest<{ user: User }>("/users/me", {
+      method: "PATCH",
+      token: session.authToken,
+      body: jsonBody({ name })
+    });
+    updateSession({ user: result.user });
+    setUserProfile((prev) => prev ? { ...prev, name: result.user.name } : { name: result.user.name });
+    notify("Profile name updated.");
+  }
+
+  function clearLocalCache(): void {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem("lunchround-currency");
+      localStorage.removeItem("lunchround-duration");
+      localStorage.removeItem("lunchround-sound");
+    } catch {}
+    setSession({ authToken: "", user: null, roundSlug: "", participantToken: "" });
+    setRound(null);
+    setParticipant(null);
+    setIsOrganizer(false);
+    setRoundInUrl("");
+    setView("setup");
+    notify("Session cache cleared.");
+  }
+
   async function logout(): Promise<void> {
     updateSession({ authToken: "", user: null });
+    setUserProfile(null);
     setShowLogin(true);
     notify("Signed out.");
   }
@@ -561,19 +733,22 @@ function App() {
       overridden: Boolean(selection.priceOverridden)
     };
   });
+
   const settlement = round?.settlementView || null;
   const totalCents = settlement?.totalCents ?? settlement?.orderTotalCents ??
     (settlement?.perParticipant || []).reduce((sum, line) => sum + safeNumber(line.totalCents), 0);
   const total = settlement
     ? totalCents / 100
     : finalSelectionRows.reduce((sum, item) => sum + item.total, 0);
+
   const dateText = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric" }).format(new Date(now));
 
   async function copyBreakdown(): Promise<void> {
+    const roundCurrency = round?.currency || currency;
     const lines = (settlement?.perParticipant || []).map((person) =>
-      `${person.participantName}: ${euro(safeNumber(person.totalCents) / 100, round?.currency || "EUR")}`
+      `${person.participantName}: ${euro(safeNumber(person.totalCents) / 100, roundCurrency)}`
     );
-    lines.push(`Total: ${euro(total, round?.currency || "EUR")}`);
+    lines.push(`Total: ${euro(total, roundCurrency)}`);
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       notify("Bill breakdown copied.");
@@ -642,7 +817,7 @@ function App() {
           <div className="flex items-center gap-3 text-[10px] text-stone-500"><span>{dateText}</span><span className="h-5 w-px bg-stone-200" /><span className="rounded-full border border-stone-200 px-2 py-1">{round ? "Connected to database" : "Backend connected"}</span></div>
         </header>
 
-        {roundError && <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-800" role="alert">{roundError}<button className="ml-3 bg-transparent font-bold" type="button" onClick={() => setRoundError("")} aria-label="Dismiss error">×</button></div>}
+        {roundError && <div className="mt-5 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-800" role="alert"><span>{roundError}</span><button className="ml-3 bg-transparent font-bold text-red-700" type="button" onClick={() => setRoundError("")} aria-label="Dismiss error">×</button></div>}
 
         {view === "setup" && (
           <OrganizeLunch
@@ -661,13 +836,19 @@ function App() {
             onStoreSearch={setStoreSearch}
             selectedStoreIds={selectedStoreIds}
             onToggleStore={(id) => setSelectedStoreIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])}
+            onSelectMultipleStores={setSelectedStoreIds}
             user={session.user}
             onSignIn={() => { setRoundError(""); setShowLogin(true); }}
             onCreateRound={(details) => runAction(() => createRound(details))}
+            onUpdateRound={(details) => runAction(() => updateRoundSettings(details))}
+            onDeleteRound={() => runAction(() => deleteRound())}
             onCopyLink={() => runAction(copyRoundLink)}
             onLockOrders={() => runAction(lockRound)}
+            onUnlockOrders={() => runAction(unlockRound)}
             onNavigateOrder={() => setView("order")}
+            onNavigateBill={() => setView("ledger")}
             onNewRound={() => runAction(startNewRound)}
+            onRefreshRound={() => runAction(refreshRound)}
             loading={isBusy}
           />
         )}
@@ -686,10 +867,12 @@ function App() {
             hours={hours}
             minutes={minutes}
             loading={isBusy}
+            user={session.user}
             onJoin={(name) => runAction(() => joinRound(name))}
             onChangeQuantity={(item, quantity) => runAction(() => changeQuantity(item, quantity))}
             onNavigateBill={() => setView("ledger")}
             onNewRound={() => runAction(startNewRound)}
+            onRefresh={() => runAction(refreshRound)}
           />
         )}
 
@@ -703,7 +886,8 @@ function App() {
             isOrganizer={isOrganizer}
             loading={isBusy}
             onLock={() => runAction(lockRound)}
-            onSettle={() => runAction(settleRound)}
+            onReopen={() => runAction(unlockRound)}
+            onSettle={(customFeeCents) => runAction(() => settleRound(customFeeCents))}
             onCopyBreakdown={() => runAction(copyBreakdown)}
             onBackToOrders={() => setView("order")}
           />
@@ -715,10 +899,31 @@ function App() {
             loading={historyLoading}
             error={historyError}
             signedIn={Boolean(session.authToken)}
+            currency={currency}
             onOpenRound={(slug) => runAction(() => loadHistoryRound(slug))}
+            onDeleteRound={(slug) => runAction(() => deleteRound(slug))}
+            onSignIn={() => { setRoundError(""); setShowLogin(true); }}
+            onNavigateOrganize={() => setView("setup")}
           />
         )}
-        {view === "settings" && <Settings theme={theme} onThemeChange={setTheme} />}
+
+        {view === "settings" && (
+          <Settings
+            user={userProfile}
+            theme={theme}
+            onThemeChange={setTheme}
+            currency={currency}
+            onCurrencyChange={setCurrency}
+            defaultDuration={defaultDuration}
+            onDefaultDurationChange={setDefaultDuration}
+            soundEnabled={soundEnabled}
+            onSoundEnabledChange={setSoundEnabled}
+            onUpdateUserName={(name) => runAction(() => updateUserProfileName(name))}
+            onSignOut={logout}
+            onSignIn={() => { setRoundError(""); setShowLogin(true); }}
+            onClearCache={clearLocalCache}
+          />
+        )}
       </main>
       <div className={`pointer-events-none fixed bottom-6 right-6 z-20 max-w-[calc(100vw-2rem)] rounded-lg bg-stone-800 px-4 py-3 text-[10px] text-white shadow-xl transition-all max-sm:bottom-[72px] max-sm:right-4 ${toast ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"}`} role="status" aria-live="polite">{toast}</div>
     </div>
