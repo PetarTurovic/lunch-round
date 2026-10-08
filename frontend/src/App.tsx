@@ -401,16 +401,32 @@ function App() {
     () => (round?.selections || []).filter((selection) => selection.status === "active"),
     [round]
   );
-  const orders = useMemo<ParticipantOrder[]>(() => (round?.participants || []).map((person) => {
-    const quantities: Record<string, number> = {};
-    const selectionIds: Record<string, string> = {};
-    for (const item of visibleItems) {
-      const selection = item.selections.find((entry) => String(entry.participantId) === String(person._id));
-      quantities[item.id] = selection?.quantity || 0;
-      selectionIds[item.id] = selection?._id || "";
+  const orders = useMemo<ParticipantOrder[]>(() => {
+    if (!round) return [];
+    const ordersList = round.orders || [];
+    if (ordersList.length > 0) {
+      return ordersList.map((order) => {
+        const pid = String(order.participantId || "");
+        return {
+          id: pid,
+          name: order.name || "Participant",
+          quantities: order.quantities || {},
+          selectionIds: {}
+        };
+      });
     }
-    return { id: person._id, name: person.name, quantities, selectionIds };
-  }), [round, visibleItems]);
+
+    return (round.participants || []).map((person) => {
+      const quantities: Record<string, number> = {};
+      const selectionIds: Record<string, string> = {};
+      for (const item of visibleItems) {
+        const selection = item.selections.find((entry) => String(entry.participantId) === String(person._id));
+        quantities[item.id] = selection?.quantity || 0;
+        selectionIds[item.id] = selection?._id || "";
+      }
+      return { id: person._id, name: person.name, quantities, selectionIds };
+    });
+  }, [round, visibleItems]);
 
   const currentOrder: ParticipantOrder = orders.find((order) => String(order.id) === String(participant?._id)) || {
     id: "",
@@ -599,12 +615,12 @@ function App() {
       setRoundInUrl(round.slug);
     }
 
-    // Save order quantities
+    // Save order quantities and name
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/order`, {
       method: "POST",
       token: session.authToken,
       participantToken: token,
-      body: jsonBody({ quantities })
+      body: jsonBody({ quantities, name: name.trim() || undefined })
     });
 
     await refreshRound();
@@ -855,6 +871,7 @@ function App() {
             isOrganizer={isOrganizer}
             locked={locked}
             hasDeadline={hasDeadline}
+            countdown={countdown}
             timeLabel={timeLabel}
             hours={hours}
             minutes={minutes}
@@ -863,6 +880,7 @@ function App() {
             onSubmitOrder={(name, quantities) => runAction(() => submitOrder(name, quantities))}
             onClearOrder={() => runAction(clearOrder)}
             onNavigateBill={() => setView("ledger")}
+            onNavigateOrganize={() => setView("setup")}
             onNewRound={() => runAction(startNewRound)}
             onRefresh={() => runAction(refreshRound)}
           />

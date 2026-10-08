@@ -331,14 +331,22 @@ export const saveOrder = async (req: Request, res: Response) => {
   const round = req.round!;
   if (round.status !== "open") throw new BadRequestError(`Cannot modify order: round is ${round.status}`);
 
-  const { quantities } = z.object({
+  const { quantities, name } = z.object({
     quantities: z.record(z.string(), z.number().int().min(0)),
+    name: z.string().min(1).max(100).optional(),
   }).parse(req.body);
 
   const order = round.orders.find((o) => o.participantId.equals(req.participant!.participantId));
   if (!order) throw new NotFoundError("Participant order");
 
   order.quantities = quantities;
+  if (name && name.trim()) {
+    const trimmed = name.trim();
+    order.name = trimmed;
+    const p = round.participants.find((item) => item.participantId.equals(req.participant!.participantId));
+    if (p) p.name = trimmed;
+    round.markModified("participants");
+  }
   order.updatedAt = new Date();
   round.markModified("orders");
   await round.save();
