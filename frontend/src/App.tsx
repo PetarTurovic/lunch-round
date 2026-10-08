@@ -379,10 +379,26 @@ function App() {
       setStoresLoading(true);
       setStoresError("");
       try {
-        const query = new URLSearchParams({ limit: "24", page: "1" });
+        const query = new URLSearchParams({ limit: "50", page: "1" });
         if (storeSearch.trim()) query.set("search", storeSearch.trim());
+        if (location) {
+          query.set("lat", String(location.lat));
+          query.set("lon", String(location.lon));
+          query.set("radius", String(radiusKm));
+          if (location.city) query.set("city", location.city);
+        }
         const result = await apiRequest<{ stores: Store[] }>(`/stores?${query.toString()}`);
-        if (!cancelled) setStores(result.stores || []);
+        if (!cancelled) {
+          const storesWithDistance = (result.stores || []).map((store) => {
+            if (location && store.location?.coordinates?.coordinates) {
+              const [storeLon, storeLat] = store.location.coordinates.coordinates;
+              const dist = calculateDistanceKm(location.lat, location.lon, storeLat, storeLon);
+              return { ...store, distanceKm: dist };
+            }
+            return store;
+          });
+          setStores(storesWithDistance);
+        }
       } catch (error) {
         if (!cancelled) {
           console.error("Could not search the restaurant catalogue.", error);
@@ -397,7 +413,7 @@ function App() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [session.roundSlug, storeSearch, view]);
+  }, [session.roundSlug, storeSearch, location, radiusKm, view]);
 
   // Load history rounds from backend
   useEffect(() => {
