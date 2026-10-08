@@ -221,6 +221,22 @@ function App() {
     }
   });
 
+  async function handleToggleFavoriteStore(storeId: string) {
+    if (!session.authToken || !session.user) {
+      setShowLogin(true);
+      return;
+    }
+    try {
+      const res = await apiRequest<{ success: boolean; isFavorited: boolean; favoriteStore: string[] }>(
+        `/stores/${encodeURIComponent(storeId)}/favorite`,
+        { method: "POST", token: session.authToken }
+      );
+      setSession((cur) => cur.user ? { ...cur, user: { ...cur.user, favoriteStore: res.favoriteStore } } : cur);
+    } catch (err) {
+      console.error("Failed to toggle favorite:", err);
+    }
+  }
+
   // Persist session
   useEffect(() => {
     try {
@@ -919,6 +935,7 @@ function App() {
             onToggleStore={(id) => setSelectedStoreIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])}
             onSelectMultipleStores={setSelectedStoreIds}
             user={session.user}
+            onToggleFavoriteStore={handleToggleFavoriteStore}
             onSignIn={() => { setRoundError(""); setShowLogin(true); }}
             onCreateRound={(details) => runAction(() => createRound(details))}
             onUpdateRound={(details) => runAction(() => updateRoundSettings(details))}

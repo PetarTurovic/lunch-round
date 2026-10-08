@@ -31,7 +31,13 @@ const verifyPassword = async (password: string, storedHash: string): Promise<boo
 
 const authResponse = (u: any) => ({
   token: signUserToken({ _id: u._id, email: u.email, name: u.name }),
-  user: { id: u._id.toString(), email: u.email, name: u.name, createdAt: u.createdAt },
+  user: {
+    id: u._id.toString(),
+    email: u.email,
+    name: u.name,
+    createdAt: u.createdAt,
+    favoriteStore: ((u.favoriteStore as any) || []).map(String),
+  },
 });
 
 export const register = async (req: Request, res: Response) => {
@@ -85,6 +91,7 @@ export const me = async (req: Request, res: Response) => {
       id: user._id.toString(),
       email: user.email,
       name: user.name,
+      favoriteStore: ((user as any).favoriteStore || []).map(String),
       location: user.location ?? null,
       createdAt: user.createdAt,
       stats: { organizedRounds, joinedRounds },

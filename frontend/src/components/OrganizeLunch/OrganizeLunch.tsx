@@ -23,15 +23,6 @@ function SectionHeading({ eyebrow, title, accent, description }: { eyebrow: stri
   );
 }
 
-const presetLocations: GeoLocation[] = [
-  { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" },
-  { lat: 40.4168, lon: -3.7038, city: "madrid", cityLabel: "Madrid", label: "Madrid" },
-  { lat: 41.3879, lon: 2.1699, city: "barcelona", cityLabel: "Barcelona", label: "Barcelona" },
-  { lat: 39.4699, lon: -0.3763, city: "valencia", cityLabel: "Valencia", label: "Valencia" },
-  { lat: 37.3891, lon: -5.9845, city: "sevilla", cityLabel: "Seville", label: "Seville" },
-  { lat: 36.7213, lon: -4.4214, city: "malaga", cityLabel: "Málaga", label: "Málaga" }
-];
-
 interface OrganizeLunchProps {
   round: Round | null;
   participant: Participant | null;
@@ -54,6 +45,7 @@ interface OrganizeLunchProps {
   onToggleStore: (id: string) => void;
   onSelectMultipleStores?: (ids: string[]) => void;
   user: User | null;
+  onToggleFavoriteStore?: (id: string) => void;
   onSignIn: () => void;
   onCreateRound: (details: { title: string; closesAt: string; feeCents?: number; location?: GeoLocation | null }) => Promise<void>;
   onUpdateRound?: (details: { title?: string; closesAt?: string | null; feeCents?: number; status?: "open" | "locked" }) => Promise<void>;
@@ -90,6 +82,7 @@ function OrganizeLunch({
   onToggleStore,
   onSelectMultipleStores,
   user,
+  onToggleFavoriteStore,
   onSignIn,
   onCreateRound,
   onUpdateRound,
@@ -106,7 +99,6 @@ function OrganizeLunch({
   const [title, setTitle] = useState("Team lunch");
   const [closesAt, setClosesAt] = useState("");
   const [feeInput, setFeeInput] = useState("");
-  const [selectedCuisineFilter, setSelectedCuisineFilter] = useState<string>("all");
   const [showQrModal, setShowQrModal] = useState(false);
   const [isEditingRound, setIsEditingRound] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,22 +137,7 @@ function OrganizeLunch({
 
   const currency = round?.currency || "EUR";
 
-  // Derive all unique cuisines from current stores
-  const availableCuisines = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of stores) {
-      for (const c of s.taxonomy?.cuisineLabels || []) {
-        if (c) set.add(c);
-      }
-    }
-    return Array.from(set).sort();
-  }, [stores]);
-
-  // Filter stores by cuisine
-  const filteredStores = useMemo(() => {
-    if (selectedCuisineFilter === "all") return stores;
-    return stores.filter((s) => (s.taxonomy?.cuisineLabels || []).includes(selectedCuisineFilter));
-  }, [stores, selectedCuisineFilter]);
+  const filteredStores = stores;
 
   // Selected store objects
   const selectedStoresList = useMemo(() => {
@@ -788,23 +765,6 @@ function OrganizeLunch({
                       <span>{isLocating ? "Locating GPS…" : "My Location"}</span>
                     </button>
 
-                    {presetLocations.map((loc) => {
-                      const isSelected = location?.city === loc.city;
-                      return (
-                        <button
-                          key={loc.city}
-                          type="button"
-                          className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
-                            isSelected
-                              ? "bg-lunch text-white shadow-xs"
-                              : "bg-white text-stone-700 border border-stone-200 hover:bg-stone-50"
-                          }`}
-                          onClick={() => onSelectLocation(loc)}
-                        >
-                          {loc.label}
-                        </button>
-                      );
-                    })}
 
                     <button
                       type="button"
@@ -901,37 +861,6 @@ function OrganizeLunch({
                   placeholder="Search restaurant names or cuisines…"
                 />
 
-                {/* Cuisine Filter Chips */}
-                {availableCuisines.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    <button
-                      type="button"
-                      className={`rounded-md px-2 py-0.5 text-[9px] font-semibold transition ${
-                        selectedCuisineFilter === "all"
-                          ? "bg-lunch text-white shadow-sm"
-                          : "bg-stone-50 text-stone-600 hover:bg-stone-100"
-                      }`}
-                      onClick={() => setSelectedCuisineFilter("all")}
-                    >
-                      All cuisines
-                    </button>
-                    {availableCuisines.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className={`rounded-md px-2 py-0.5 text-[9px] font-semibold transition ${
-                          selectedCuisineFilter === c
-                            ? "bg-lunch text-white shadow-sm"
-                            : "bg-stone-50 text-stone-600 hover:bg-stone-100"
-                        }`}
-                        onClick={() => setSelectedCuisineFilter(c)}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
                 {/* Selected Stores Tray */}
                 {selectedStoresList.length > 0 && (
                   <div className="my-1 rounded-lg border border-green-200 bg-green-50/60 p-2.5">
@@ -971,15 +900,23 @@ function OrganizeLunch({
                 <div className="grid gap-2 max-h-72 overflow-y-auto">
                   {filteredStores.map((store) => {
                     const selected = selectedStoreIds.includes(store._id);
+                    const isFavorite = Boolean(user?.favoriteStore?.includes(store._id));
                     return (
-                      <button
-                        className={`flex min-h-14 items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${
-                          selected ? "border-green-400 bg-green-50/70" : "border-stone-200 bg-white hover:bg-stone-50"
-                        }`}
-                        type="button"
+                      <div
+                        role="button"
+                        tabIndex={0}
                         key={store._id}
                         aria-pressed={selected}
+                        className={`flex min-h-14 items-center gap-3 rounded-lg border px-3 py-2 text-left transition cursor-pointer select-none ${
+                          selected ? "border-green-400 bg-green-50/70" : "border-stone-200 bg-white hover:bg-stone-50"
+                        }`}
                         onClick={() => onToggleStore(store._id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onToggleStore(store._id);
+                          }
+                        }}
                       >
                         <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold ${selected ? "bg-green-100 text-green-800" : "bg-stone-100 text-stone-500"}`}>
                           {selected ? "✓" : "＋"}
@@ -997,17 +934,30 @@ function OrganizeLunch({
                             {[store.location?.cityLabel, ...(store.taxonomy?.cuisineLabels || []).slice(0, 2)].filter(Boolean).join(" · ")}
                           </small>
                         </span>
-                        <div className="text-right">
+                        <div className="flex items-center gap-2 text-right">
                           {store.rating != null && (
                             <span className="block text-[9px] text-amber-700 font-semibold">
                               ★ {Number(typeof store.rating === "object" ? store.rating.value : store.rating).toFixed(1)}
                             </span>
                           )}
-                          <span className="whitespace-nowrap text-[9px] text-stone-600">
-                            {store.delivery?.fee?.amount == null ? "" : euro(store.delivery.fee.amount)}
-                          </span>
+                          <button
+                            type="button"
+                            title={isFavorite ? "Remove from favorites" : "Save to favorites"}
+                            aria-label={isFavorite ? "Remove from favorites" : "Save to favorites"}
+                            className={`grid h-7 w-7 place-items-center rounded-lg transition text-sm ${
+                              isFavorite
+                                ? "text-rose-500 hover:bg-rose-50"
+                                : "text-stone-300 hover:text-rose-500 hover:bg-stone-100"
+                            }`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onToggleFavoriteStore?.(store._id);
+                            }}
+                          >
+                            {isFavorite ? "♥" : "♡"}
+                          </button>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

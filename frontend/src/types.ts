@@ -5,6 +5,7 @@ export interface User {
   _id?: string;
   name: string;
   email?: string;
+  favoriteStore?: string[];
 }
 
 export interface Session {
@@ -204,6 +205,7 @@ export interface UserProfile {
   id?: string;
   name: string;
   email?: string;
+  favoriteStore?: string[];
   location?: GeoLocation | null;
   createdAt?: string;
   stats?: UserStats;
