@@ -73,7 +73,7 @@ const populateShortlist = async (storeIds: string[], items: RoundItem[] = []): P
       _id: String(id),
       slug: store?.slug || null,
       name: store?.name || item?.storeName || id,
-      platform: store?.platform || "glovo",
+      platform: store?.platform || "",
       currency: (store?.currency || "EUR").toUpperCase(),
       rating: parseRating(store?.rating),
       ...(count > 0 ? { itemCount: count } : {}),

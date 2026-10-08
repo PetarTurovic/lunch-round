@@ -378,7 +378,6 @@ function OrganizeLunch({
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-stone-100 px-3 py-2.5 bg-stone-50/50" key={store._id}>
                     <div>
                       <strong className="block text-xs text-stone-800">🍴 {store.name}</strong>
-                      <span className="text-[9px] text-stone-400 capitalize">{store.platform || "delivery"}</span>
                     </div>
                     {store.rating != null && (
                       <span className="text-[10px] font-semibold text-amber-700">
@@ -832,7 +831,7 @@ function OrganizeLunch({
                         <span className="min-w-0 flex-1">
                           <strong className="block truncate text-xs text-stone-800">{store.name}</strong>
                           <small className="mt-0.5 block truncate text-[9px] text-stone-500">
-                            {[store.location?.cityLabel, ...(store.taxonomy?.cuisineLabels || []).slice(0, 2)].filter(Boolean).join(" · ") || store.platform}
+                            {[store.location?.cityLabel, ...(store.taxonomy?.cuisineLabels || []).slice(0, 2)].filter(Boolean).join(" · ")}
                           </small>
                         </span>
                         <div className="text-right">
