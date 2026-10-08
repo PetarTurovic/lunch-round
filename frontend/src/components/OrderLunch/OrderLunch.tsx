@@ -348,11 +348,18 @@ function OrderLunch({
           <h1 className="mb-1.5 font-display text-3xl font-bold tracking-tight max-sm:text-2xl">
             {round.title} <span className="text-lunch">menu.</span>
           </h1>
-          <p className="mb-0 text-xs leading-relaxed text-stone-500">
-            {locked
-              ? `Ordering closed at ${timeLabel}. Menus and selections are in read-only mode.`
-              : "Choose your dishes from the restaurant menu below and submit your picks to the organizer."}
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+            <p className="mb-0 text-xs leading-relaxed text-stone-500">
+              {locked
+                ? `Ordering closed at ${timeLabel}. Menus and selections are in read-only mode.`
+                : "Choose your dishes from the restaurant menu below and submit your picks to the organizer."}
+            </p>
+            {round.location && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-600">
+                📍 {round.location.cityLabel || round.location.city || "Selected location"} ({round.location.radiusKm || 5} km radius)
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

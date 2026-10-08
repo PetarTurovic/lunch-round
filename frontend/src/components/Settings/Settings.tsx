@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { Theme, UserProfile } from "../../types";
+import type { GeoLocation, Theme, UserProfile } from "../../types";
 
 interface SettingsProps {
   user: UserProfile | null;
@@ -9,6 +9,10 @@ interface SettingsProps {
   onCurrencyChange: (currency: string) => void;
   defaultDuration: number;
   onDefaultDurationChange: (mins: number) => void;
+  location: GeoLocation | null;
+  onLocationChange: (loc: GeoLocation | null) => void;
+  radiusKm: number;
+  onRadiusChange: (radius: number) => void;
   onUpdateUserName?: (name: string) => Promise<void>;
   onSignOut?: () => void;
   onSignIn?: () => void;
@@ -24,6 +28,15 @@ const currencies = [
 
 const durationPresets = [15, 30, 45, 60];
 
+const presetLocations: GeoLocation[] = [
+  { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" },
+  { lat: 40.4168, lon: -3.7038, city: "madrid", cityLabel: "Madrid", label: "Madrid" },
+  { lat: 41.3879, lon: 2.1699, city: "barcelona", cityLabel: "Barcelona", label: "Barcelona" },
+  { lat: 39.4699, lon: -0.3763, city: "valencia", cityLabel: "Valencia", label: "Valencia" },
+  { lat: 37.3891, lon: -5.9845, city: "sevilla", cityLabel: "Seville", label: "Seville" },
+  { lat: 36.7213, lon: -4.4214, city: "malaga", cityLabel: "Málaga", label: "Málaga" }
+];
+
 function Settings({
   user,
   theme,
@@ -32,11 +45,43 @@ function Settings({
   onCurrencyChange,
   defaultDuration,
   onDefaultDurationChange,
+  location,
+  onLocationChange,
+  radiusKm,
+  onRadiusChange,
   onUpdateUserName,
   onSignOut,
   onSignIn,
   onClearCache
 }: SettingsProps) {
+  const [isLocating, setIsLocating] = useState(false);
+  const [geoError, setGeoError] = useState("");
+
+  function handleUseCurrentLocation() {
+    if (!navigator.geolocation) {
+      setGeoError("Geolocation is not supported by your browser.");
+      return;
+    }
+    setIsLocating(true);
+    setGeoError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
+        onLocationChange({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          label: "Current location",
+          cityLabel: "Near me"
+        });
+      },
+      (err) => {
+        setIsLocating(false);
+        setGeoError(err.message || "Unable to retrieve your location.");
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(user?.name || "");
   const [savingName, setSavingName] = useState(false);
@@ -218,7 +263,7 @@ function Settings({
             </div>
 
             {/* Default Closing Duration */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-stone-100 pb-4">
               <div>
                 <h3 className="mb-0.5 text-xs font-semibold text-stone-800">Default ordering window</h3>
                 <p className="mb-0 text-[10px] text-stone-500">Quick preset duration for new rounds.</p>
@@ -233,6 +278,90 @@ function Settings({
                     onClick={() => onDefaultDurationChange(mins)}
                   >
                     {mins}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Default Search Location */}
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-stone-100 pb-4">
+              <div>
+                <h3 className="mb-0.5 text-xs font-semibold text-stone-800">Default office / team location</h3>
+                <p className="mb-0 text-[10px] text-stone-500">
+                  Pre-selects your preferred hub or city when browsing restaurants.
+                </p>
+                {geoError && (
+                  <p className="mb-0 mt-1 text-[9px] text-amber-700">⚠️ {geoError}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
+                    isLocating
+                      ? "bg-amber-100 text-amber-900 border border-amber-300"
+                      : location?.label === "Current location"
+                      ? "bg-lunch text-white shadow-xs"
+                      : "bg-white text-stone-700 border border-stone-200 hover:bg-stone-50"
+                  }`}
+                  onClick={handleUseCurrentLocation}
+                  disabled={isLocating}
+                >
+                  <span>🎯</span>
+                  <span>{isLocating ? "Locating…" : "GPS Location"}</span>
+                </button>
+                {presetLocations.map((loc) => {
+                  const isSelected = location?.city === loc.city;
+                  return (
+                    <button
+                      key={loc.city}
+                      type="button"
+                      className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
+                        isSelected
+                          ? "bg-lunch text-white shadow-xs"
+                          : "bg-white text-stone-700 border border-stone-200 hover:bg-stone-50"
+                      }`}
+                      onClick={() => onLocationChange(loc)}
+                    >
+                      {loc.label}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
+                    !location
+                      ? "bg-stone-800 text-white shadow-xs"
+                      : "bg-white text-stone-600 border border-stone-200 hover:bg-stone-50"
+                  }`}
+                  onClick={() => onLocationChange(null)}
+                >
+                  All Spain
+                </button>
+              </div>
+            </div>
+
+            {/* Default Search Radius */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h3 className="mb-0.5 text-xs font-semibold text-stone-800">Default restaurant search radius</h3>
+                <p className="mb-0 text-[10px] text-stone-500">
+                  Maximum delivery / pickup distance from your office or selected location.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1">
+                {[1, 2, 3, 5, 10, 15, 25].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className={`min-h-8 rounded-md px-2.5 text-[10px] font-semibold transition ${
+                      radiusKm === r
+                        ? "bg-white text-lunch-dark shadow-sm"
+                        : "text-stone-500 hover:text-stone-800"
+                    }`}
+                    onClick={() => onRadiusChange(r)}
+                  >
+                    {r}km
                   </button>
                 ))}
               </div>

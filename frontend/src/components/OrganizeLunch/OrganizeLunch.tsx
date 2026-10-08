@@ -1,7 +1,7 @@
 import { useState, useMemo, type FormEvent, type ReactNode } from "react";
 import { euro, initials, shareLink } from "../../utils";
 import { generateQrSvg } from "../../qr";
-import type { Participant, Round, Store, User } from "../../types";
+import type { GeoLocation, Participant, Round, Store, User } from "../../types";
 import CopyRoundLink from "../CopyRoundLink/CopyRoundLink";
 
 function Card({ className = "", children }: { className?: string; children: ReactNode }) {
@@ -23,6 +23,15 @@ function SectionHeading({ eyebrow, title, accent, description }: { eyebrow: stri
   );
 }
 
+const presetLocations: GeoLocation[] = [
+  { lat: 38.3452, lon: -0.4810, city: "alicante", cityLabel: "Alicante", label: "Alicante" },
+  { lat: 40.4168, lon: -3.7038, city: "madrid", cityLabel: "Madrid", label: "Madrid" },
+  { lat: 41.3879, lon: 2.1699, city: "barcelona", cityLabel: "Barcelona", label: "Barcelona" },
+  { lat: 39.4699, lon: -0.3763, city: "valencia", cityLabel: "Valencia", label: "Valencia" },
+  { lat: 37.3891, lon: -5.9845, city: "sevilla", cityLabel: "Seville", label: "Seville" },
+  { lat: 36.7213, lon: -4.4214, city: "malaga", cityLabel: "Málaga", label: "Málaga" }
+];
+
 interface OrganizeLunchProps {
   round: Round | null;
   participant: Participant | null;
@@ -37,12 +46,16 @@ interface OrganizeLunchProps {
   storesError: string;
   storeSearch: string;
   onStoreSearch: (search: string) => void;
+  location: GeoLocation | null;
+  onSelectLocation: (loc: GeoLocation | null) => void;
+  radiusKm: number;
+  onRadiusChange: (radius: number) => void;
   selectedStoreIds: string[];
   onToggleStore: (id: string) => void;
   onSelectMultipleStores?: (ids: string[]) => void;
   user: User | null;
   onSignIn: () => void;
-  onCreateRound: (details: { title: string; closesAt: string; feeCents?: number }) => Promise<void>;
+  onCreateRound: (details: { title: string; closesAt: string; feeCents?: number; location?: GeoLocation | null }) => Promise<void>;
   onUpdateRound?: (details: { title?: string; closesAt?: string | null; feeCents?: number; status?: "open" | "locked" }) => Promise<void>;
   onDeleteRound?: () => Promise<void>;
   onCopyLink: () => Promise<void>;
@@ -69,6 +82,10 @@ function OrganizeLunch({
   storesError,
   storeSearch,
   onStoreSearch,
+  location,
+  onSelectLocation,
+  radiusKm,
+  onRadiusChange,
   selectedStoreIds,
   onToggleStore,
   onSelectMultipleStores,
@@ -93,6 +110,33 @@ function OrganizeLunch({
   const [showQrModal, setShowQrModal] = useState(false);
   const [isEditingRound, setIsEditingRound] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [geoError, setGeoError] = useState("");
+
+  function handleUseCurrentLocation() {
+    if (!navigator.geolocation) {
+      setGeoError("Geolocation is not supported by your browser.");
+      return;
+    }
+    setIsLocating(true);
+    setGeoError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
+        onSelectLocation({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          label: "Current location",
+          cityLabel: "Near me"
+        });
+      },
+      (err) => {
+        setIsLocating(false);
+        setGeoError(err.message || "Unable to retrieve your current location.");
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
 
   // Edit Round state
   const [editTitle, setEditTitle] = useState("");
@@ -147,7 +191,7 @@ function OrganizeLunch({
     event.preventDefault();
     const parsedFee = parseFloat(feeInput);
     const feeCents = Number.isFinite(parsedFee) && parsedFee >= 0 ? Math.round(parsedFee * 100) : 0;
-    await onCreateRound({ title: title.trim(), closesAt, feeCents });
+    await onCreateRound({ title: title.trim(), closesAt, feeCents, location });
   }
 
   async function handleRefresh() {
@@ -363,6 +407,11 @@ function OrganizeLunch({
                   <h2 className="font-display text-base font-bold text-ink">
                     {(round.shortlist || []).length} {(round.shortlist || []).length === 1 ? "restaurant" : "restaurants"} selected
                   </h2>
+                  {round.location && (
+                    <span className="mt-1 inline-flex items-center gap-1 rounded bg-stone-100 px-2 py-0.5 text-[9px] font-medium text-stone-600">
+                      📍 {round.location.cityLabel || round.location.city || "Selected area"} ({round.location.radiusKm || 5} km radius)
+                    </span>
+                  )}
                 </div>
                 <span
                   className={`rounded-full border px-3 py-1 text-[9px] font-semibold ${
@@ -702,13 +751,126 @@ function OrganizeLunch({
               </div>
 
               {/* Restaurant Catalogue & Search */}
-              <div className="grid gap-2 pt-2 border-t border-stone-100">
+              <div className="grid gap-3 pt-2 border-t border-stone-100">
+                {/* Location & Radius Selector */}
+                <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3.5 grid gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-stone-700">
+                      <span>📍</span>
+                      <span>LOCATION & SEARCH RADIUS</span>
+                    </div>
+                    {location && (
+                      <button
+                        type="button"
+                        className="text-[9px] font-semibold text-stone-500 hover:text-stone-800"
+                        onClick={() => onSelectLocation(null)}
+                      >
+                        Reset to all Spain
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Location Selector Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
+                        isLocating
+                          ? "bg-amber-100 text-amber-900 border border-amber-300"
+                          : location?.label === "Current location"
+                          ? "bg-lunch text-white shadow-xs"
+                          : "bg-white text-stone-700 border border-stone-200 hover:bg-stone-50"
+                      }`}
+                      onClick={handleUseCurrentLocation}
+                      disabled={isLocating}
+                    >
+                      <span>🎯</span>
+                      <span>{isLocating ? "Locating GPS…" : "My Location"}</span>
+                    </button>
+
+                    {presetLocations.map((loc) => {
+                      const isSelected = location?.city === loc.city;
+                      return (
+                        <button
+                          key={loc.city}
+                          type="button"
+                          className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
+                            isSelected
+                              ? "bg-lunch text-white shadow-xs"
+                              : "bg-white text-stone-700 border border-stone-200 hover:bg-stone-50"
+                          }`}
+                          onClick={() => onSelectLocation(loc)}
+                        >
+                          {loc.label}
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold transition ${
+                        !location
+                          ? "bg-stone-800 text-white shadow-xs"
+                          : "bg-white text-stone-600 border border-stone-200 hover:bg-stone-50"
+                      }`}
+                      onClick={() => onSelectLocation(null)}
+                    >
+                      All Spain
+                    </button>
+                  </div>
+
+                  {geoError && (
+                    <p className="mb-0 text-[9px] text-amber-700 bg-amber-50 rounded-md p-1.5 border border-amber-200">
+                      ⚠️ {geoError}
+                    </p>
+                  )}
+
+                  {/* Radius Selector Pills */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200/70 pt-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-stone-600">Search radius:</span>
+                      <strong className="font-display text-xs text-lunch-dark">{radiusKm} km</strong>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 5, 10, 15, 25].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          className={`h-6 rounded-md px-2 text-[9px] font-bold transition ${
+                            radiusKm === r
+                              ? "bg-lunch-dark text-white shadow-xs"
+                              : "bg-white text-stone-600 border border-stone-200 hover:bg-stone-100"
+                          }`}
+                          onClick={() => onRadiusChange(r)}
+                        >
+                          {r}km
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Proximity Feedback */}
+                  {location ? (
+                    <div className="flex items-center gap-1.5 text-[9px] text-stone-500 pt-0.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>
+                        Showing restaurants within <strong>{radiusKm} km</strong> of <strong>{location.label || location.cityLabel || location.city}</strong>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-[9px] text-stone-400">
+                      Showing restaurants from all locations. Pick a city or "My Location" to filter by distance.
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-stone-700" htmlFor="store-search">
                       Choose restaurants
                     </label>
-                    <p className="mb-0 text-[9px] text-stone-400">Search the active restaurant catalogue in MongoDB.</p>
+                    <p className="mb-0 text-[9px] text-stone-400">Search by restaurant name, food type, or ingredients.</p>
                   </div>
                   {onSelectMultipleStores && filteredStores.length > 0 && (
                     <div className="flex items-center gap-1.5">
@@ -801,7 +963,7 @@ function OrganizeLunch({
                 {storesError && <p className="mb-0 text-[10px] text-red-700" role="alert">{storesError}</p>}
                 {!storesLoading && !storesError && stores.length === 0 && (
                   <p className="mb-0 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[10px] leading-relaxed text-amber-900">
-                    No active restaurants were returned by the database. Add restaurant catalogue data to MongoDB before creating a round.
+                    No restaurants were found within {radiusKm} km of {location?.label || "the selected location"}. Try expanding the radius or picking another location.
                   </p>
                 )}
 
@@ -823,7 +985,14 @@ function OrganizeLunch({
                           {selected ? "✓" : "＋"}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <strong className="block truncate text-xs text-stone-800">{store.name}</strong>
+                          <div className="flex items-center gap-2">
+                            <strong className="block truncate text-xs text-stone-800">{store.name}</strong>
+                            {store.distanceKm != null && (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.2 text-[8px] font-bold text-emerald-800">
+                                📍 {store.distanceKm} km
+                              </span>
+                            )}
+                          </div>
                           <small className="mt-0.5 block truncate text-[9px] text-stone-500">
                             {[store.location?.cityLabel, ...(store.taxonomy?.cuisineLabels || []).slice(0, 2)].filter(Boolean).join(" · ")}
                           </small>
