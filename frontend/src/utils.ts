@@ -7,10 +7,62 @@ export const safeNumber = (value: number | string | null | undefined): number =>
   return Number.isFinite(number) && number >= 0 ? number : 0;
 };
 
-export const euro = (value: number, currency = "EUR"): string => new Intl.NumberFormat("en-IE", {
-  style: "currency",
-  currency
-}).format(value);
+export const euro = (value: number, currency = "EUR"): string => {
+  try {
+    return new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: currency || "EUR"
+    }).format(value);
+  } catch {
+    return `${currency || "€"} ${value.toFixed(2)}`;
+  }
+};
+
+export const formatCurrency = euro;
+
+export function formatDate(date: string | Date | null | undefined, options?: Intl.DateTimeFormatOptions): string {
+  if (!date) return "Date unavailable";
+  try {
+    const d = typeof date === "string" ? new Date(date) : date;
+    if (!Number.isFinite(d.getTime())) return "Invalid date";
+    return new Intl.DateTimeFormat("en", options || { dateStyle: "medium", timeStyle: "short" }).format(d);
+  } catch {
+    return "Date unavailable";
+  }
+}
+
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const success = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      return success;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export async function shareLink(data: { title: string; text?: string; url: string }): Promise<boolean> {
+  if (typeof navigator.share === "function") {
+    try {
+      await navigator.share(data);
+      return true;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return false;
+    }
+  }
+  return copyToClipboard(data.url);
+}
 
 interface DemoItem {
   id: string;

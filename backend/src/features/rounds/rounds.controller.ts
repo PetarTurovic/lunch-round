@@ -73,7 +73,7 @@ const populateShortlist = async (storeIds: string[], items: RoundItem[] = []): P
       _id: String(id),
       slug: store?.slug || null,
       name: store?.name || item?.storeName || id,
-      platform: store?.platform || "glovo",
+      platform: store?.platform || "",
       currency: (store?.currency || "EUR").toUpperCase(),
       rating: parseRating(store?.rating),
       ...(count > 0 ? { itemCount: count } : {}),
@@ -237,6 +237,7 @@ export const updateRound = async (req: Request, res: Response) => {
     }).nullable().optional(),
     feeCents: z.number().int().min(0).optional(),
     closesAt: z.coerce.date().nullable().optional(),
+    status: z.enum(["open", "locked", "ordered"]).optional(),
     storeIds: z.array(z.string()).optional(),
     shortlist: z.array(z.any()).optional(),
     items: z.array(itemSchema).optional(),
@@ -250,6 +251,7 @@ export const updateRound = async (req: Request, res: Response) => {
   }
   if (body.feeCents !== undefined) round.feeCents = body.feeCents;
   if (body.closesAt !== undefined) round.closesAt = body.closesAt;
+  if (body.status !== undefined) round.status = body.status;
 
   if (body.items !== undefined) {
     round.items = body.items;
@@ -329,14 +331,22 @@ export const saveOrder = async (req: Request, res: Response) => {
   const round = req.round!;
   if (round.status !== "open") throw new BadRequestError(`Cannot modify order: round is ${round.status}`);
 
-  const { quantities } = z.object({
+  const { quantities, name } = z.object({
     quantities: z.record(z.string(), z.number().int().min(0)),
+    name: z.string().min(1).max(100).optional(),
   }).parse(req.body);
 
   const order = round.orders.find((o) => o.participantId.equals(req.participant!.participantId));
   if (!order) throw new NotFoundError("Participant order");
 
   order.quantities = quantities;
+  if (name && name.trim()) {
+    const trimmed = name.trim();
+    order.name = trimmed;
+    const p = round.participants.find((item) => item.participantId.equals(req.participant!.participantId));
+    if (p) p.name = trimmed;
+    round.markModified("participants");
+  }
   order.updatedAt = new Date();
   round.markModified("orders");
   await round.save();

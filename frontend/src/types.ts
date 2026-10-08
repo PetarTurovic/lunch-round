@@ -173,3 +173,29 @@ export interface AuthDetails {
 export interface HistoryRound extends Round {
   settlementView?: Settlement;
 }
+
+export interface UserStats {
+  organizedRounds: number;
+  joinedRounds: number;
+}
+
+export interface UserProfile {
+  id?: string;
+  name: string;
+  email?: string;
+  createdAt?: string;
+  stats?: UserStats;
+}
+
+export interface AppPreferences {
+  theme: Theme;
+  currency: string;
+  defaultDurationMinutes: number;
+}
+
+export interface RoundUpdateDetails {
+  title?: string;
+  closesAt?: string | null;
+  feeCents?: number;
+  status?: "open" | "locked";
+}

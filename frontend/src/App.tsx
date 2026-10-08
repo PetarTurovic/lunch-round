@@ -15,11 +15,13 @@ import type {
   ParticipantOrder,
   RoundItem,
   Round,
+  RoundUpdateDetails,
   Session,
   Store,
   StoreSummary,
   Theme,
   User,
+  UserProfile,
   View
 } from "./types";
 
@@ -161,7 +163,6 @@ function menuItemsForRound(round: Round): OrderMenuItem[] {
 function App() {
   const [session, setSession] = useState<Session>(readSession);
   const [showLogin, setShowLogin] = useState(() => !session.authToken && !sharedRoundLink);
-  const [isSharedRoundView, setIsSharedRoundView] = useState(sharedRoundLink);
   const [view, setView] = useState<View>(sharedRoundLink ? "order" : "setup");
   const [round, setRound] = useState<Round | null>(null);
   const [participant, setParticipant] = useState<Participant | null>(null);
@@ -181,6 +182,27 @@ function App() {
   const [historyError, setHistoryError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // User profile and preferences
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  const [currency, setCurrency] = useState<string>(() => {
+    try {
+      return localStorage.getItem("lunchround-currency") || "EUR";
+    } catch {
+      return "EUR";
+    }
+  });
+
+  const [defaultDuration, setDefaultDuration] = useState<number>(() => {
+    try {
+      const val = Number(localStorage.getItem("lunchround-duration"));
+      return val > 0 ? val : 30;
+    } catch {
+      return 30;
+    }
+  });
+
+  // Persist session
   useEffect(() => {
     try {
       if (session.authToken || session.roundSlug || session.participantToken) {
@@ -194,27 +216,63 @@ function App() {
     }
   }, [session]);
 
+  // Persist preferences
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     try {
       localStorage.setItem("lunchround-theme", theme);
     } catch (error) {
       console.error("Could not save the selected theme.", error);
-      setToast("Your theme preference could not be saved.");
     }
   }, [theme]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-currency", currency);
+    } catch {}
+  }, [currency]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("lunchround-duration", String(defaultDuration));
+    } catch {}
+  }, [defaultDuration]);
+
+  // Live timer tick
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
+  // Toast timeout
   useEffect(() => {
     if (!toast) return undefined;
     const timeout = window.setTimeout(() => setToast(""), 3000);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  // Load user profile & stats from backend
+  useEffect(() => {
+    if (!session.authToken) {
+      setUserProfile(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadUser() {
+      try {
+        const result = await apiRequest<{ user: UserProfile }>("/users/me", { token: session.authToken });
+        if (!cancelled) setUserProfile(result.user);
+      } catch {
+        if (!cancelled && session.user) {
+          setUserProfile({ name: session.user.name, email: session.user.email });
+        }
+      }
+    }
+    loadUser();
+    return () => { cancelled = true; };
+  }, [session.authToken]);
+
+  // Load round data from backend
   useEffect(() => {
     const slug = session.roundSlug;
     if (!slug) {
@@ -238,11 +296,11 @@ function App() {
         let organizer = false;
         let invalidParticipantToken = false;
 
-        if (session.participantToken) {
+        if (session.participantToken || session.authToken) {
           try {
             const me = await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(
               `/rounds/${encodeURIComponent(slug)}/me`,
-              { participantToken: session.participantToken }
+              { token: session.authToken, participantToken: session.participantToken }
             );
             nextParticipant = me.participant
               ? { ...me.participant, _id: String(me.participant.participantId || me.participant._id) }
@@ -277,8 +335,9 @@ function App() {
 
     loadRound();
     return () => { cancelled = true; };
-  }, [session.roundSlug, session.participantToken]);
+  }, [session.roundSlug, session.participantToken, session.authToken]);
 
+  // Load store catalogue when creating a round
   useEffect(() => {
     if (session.roundSlug || view !== "setup") return undefined;
     let cancelled = false;
@@ -286,7 +345,7 @@ function App() {
       setStoresLoading(true);
       setStoresError("");
       try {
-        const query = new URLSearchParams({ limit: "12", page: "1" });
+        const query = new URLSearchParams({ limit: "24", page: "1" });
         if (storeSearch.trim()) query.set("search", storeSearch.trim());
         const result = await apiRequest<{ stores: Store[] }>(`/stores?${query.toString()}`);
         if (!cancelled) setStores(result.stores || []);
@@ -306,11 +365,12 @@ function App() {
     };
   }, [session.roundSlug, storeSearch, view]);
 
+  // Load history rounds from backend
   useEffect(() => {
     if (view !== "history") return undefined;
     if (!session.authToken) {
       setHistoryRounds([]);
-      setHistoryError("Sign in from Organize lunch to see rounds associated with your account.");
+      setHistoryError("");
       return undefined;
     }
     let cancelled = false;
@@ -336,27 +396,46 @@ function App() {
     return () => { cancelled = true; };
   }, [view, session.authToken]);
 
+  // Menu items and order calculations
   const visibleItems = useMemo(() => round ? menuItemsForRound(round) : [], [round]);
   const activeSelections = useMemo(
     () => (round?.selections || []).filter((selection) => selection.status === "active"),
     [round]
   );
-  const orders = useMemo<ParticipantOrder[]>(() => (round?.participants || []).map((person) => {
-    const quantities: Record<string, number> = {};
-    const selectionIds: Record<string, string> = {};
-    for (const item of visibleItems) {
-      const selection = item.selections.find((entry) => String(entry.participantId) === String(person._id));
-      quantities[item.id] = selection?.quantity || 0;
-      selectionIds[item.id] = selection?._id || "";
+  const orders = useMemo<ParticipantOrder[]>(() => {
+    if (!round) return [];
+    const ordersList = round.orders || [];
+    if (ordersList.length > 0) {
+      return ordersList.map((order) => {
+        const pid = String(order.participantId || "");
+        return {
+          id: pid,
+          name: order.name || "Participant",
+          quantities: order.quantities || {},
+          selectionIds: {}
+        };
+      });
     }
-    return { id: person._id, name: person.name, quantities, selectionIds };
-  }), [round, visibleItems]);
+
+    return (round.participants || []).map((person) => {
+      const quantities: Record<string, number> = {};
+      const selectionIds: Record<string, string> = {};
+      for (const item of visibleItems) {
+        const selection = item.selections.find((entry) => String(entry.participantId) === String(person._id));
+        quantities[item.id] = selection?.quantity || 0;
+        selectionIds[item.id] = selection?._id || "";
+      }
+      return { id: person._id, name: person.name, quantities, selectionIds };
+    });
+  }, [round, visibleItems]);
+
   const currentOrder: ParticipantOrder = orders.find((order) => String(order.id) === String(participant?._id)) || {
     id: "",
     name: participant?.name || "",
     quantities: {},
     selectionIds: {}
   };
+
   const closesAt = round?.closesAt ? new Date(round.closesAt) : null;
   const hasDeadline = Boolean(closesAt && Number.isFinite(closesAt.getTime()));
   const deadlineElapsed = closesAt !== null && closesAt.getTime() <= now;
@@ -366,13 +445,21 @@ function App() {
   const minutes = Math.floor((remaining % 3_600_000) / 60_000);
   const seconds = Math.floor((remaining % 60_000) / 1000);
   const countdown = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+
   const timeLabel = hasDeadline && closesAt
     ? new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(closesAt)
     : "not set";
   const dateLabel = closesAt && closesAt.toDateString() === new Date(now).toDateString()
     ? "today"
     : "at the selected time";
-  const pageNames: Record<View, string> = { setup: "Organize lunch", order: "Order lunch", ledger: "Final bill", history: "History", settings: "Settings" };
+
+  const pageNames: Record<View, string> = {
+    setup: "Organize lunch",
+    order: "Order lunch",
+    ledger: "Final bill",
+    history: "History",
+    settings: "Settings"
+  };
 
   function notify(message: string): void {
     setToast(message);
@@ -396,7 +483,6 @@ function App() {
     setRound(null);
     setParticipant(null);
     setIsOrganizer(false);
-    setIsSharedRoundView(false);
     setView("setup");
   }
 
@@ -410,7 +496,7 @@ function App() {
     notify(mode === "register" ? "Account created." : "Signed in.");
   }
 
-  async function createRound({ title, closesAt }: { title: string; closesAt: string }): Promise<void> {
+  async function createRound({ title, closesAt, feeCents }: { title: string; closesAt: string; feeCents?: number }): Promise<void> {
     if (!session.authToken) throw new Error("Sign in before creating a lunch round.");
     if (!selectedStoreIds.length) throw new Error("Choose at least one restaurant.");
     const selectedStores = await Promise.all(selectedStoreIds.map(async (storeId) => {
@@ -437,6 +523,8 @@ function App() {
       token: session.authToken,
       body: jsonBody({
         title,
+        currency,
+        feeCents: feeCents || 0,
         venue: selectedStores.length === 1 ? selectedStores[0].name : "Multiple restaurants",
         items,
         closesAt: closesAt ? new Date(closesAt).toISOString() : undefined,
@@ -452,23 +540,49 @@ function App() {
     notify("Lunch round created and saved to the database.");
   }
 
-  async function joinRound(name: string): Promise<void> {
-    if (!round) throw new Error("Load a lunch round before joining.");
-    const result = await apiRequest<{ token: string; participant: Participant }>(`/rounds/${encodeURIComponent(round.slug)}/join`, {
-      method: "POST",
+  async function updateRoundSettings(changes: RoundUpdateDetails): Promise<void> {
+    if (!round) return;
+    const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(round.slug)}`, {
+      method: "PATCH",
       token: session.authToken,
-      body: jsonBody({ name })
+      participantToken: session.participantToken,
+      body: jsonBody(changes)
     });
-    updateSession({ roundSlug: round.slug, participantToken: result.token });
-    setRoundInUrl(round.slug);
-    notify(`Joined as ${result.participant.name}.`);
+    setRound(normalizeRound(result.round));
+    notify("Round settings updated.");
   }
+
+  async function deleteRound(targetSlug?: string): Promise<void> {
+    const slug = targetSlug || round?.slug;
+    if (!slug) return;
+    await apiRequest(`/rounds/${encodeURIComponent(slug)}`, {
+      method: "DELETE",
+      token: session.authToken,
+      participantToken: session.participantToken
+    });
+    if (slug === round?.slug) {
+      await startNewRound();
+    } else {
+      setHistoryRounds((prev) => prev.filter((r) => r.slug !== slug));
+    }
+    notify("Lunch round deleted.");
+  }
+
+  async function unlockRound(): Promise<void> {
+    if (!round) return;
+    await updateRoundSettings({ status: "open" });
+    notify("Orders unlocked and reopened.");
+  }
+
 
   async function refreshRound(): Promise<void> {
     if (!session.roundSlug) return;
     const result = await apiRequest<{ round: Round }>(`/rounds/${encodeURIComponent(session.roundSlug)}`);
-    const me = session.participantToken
-      ? await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(`/rounds/${encodeURIComponent(session.roundSlug)}/me`, { participantToken: session.participantToken })
+    const me = (session.participantToken || session.authToken)
+      ? await apiRequest<{ participant: Participant | null; isOrganizer: boolean }>(`/rounds/${encodeURIComponent(session.roundSlug)}/me`, {
+          token: session.authToken,
+          participantToken: session.participantToken
+        })
       : { participant: null, isOrganizer: false };
     setRound(normalizeRound(result.round));
     setParticipant(me.participant
@@ -477,17 +591,41 @@ function App() {
     setIsOrganizer(Boolean(me.isOrganizer));
   }
 
-  async function submitOrder(quantities: Record<string, number>): Promise<void> {
-    if (!participant) throw new Error("Join this round before adding menu items.");
+  async function submitOrder(name: string, quantities: Record<string, number>): Promise<void> {
     if (locked) throw new Error("This lunch round is locked.");
-    if (!round) throw new Error("Load a lunch round before adding menu items.");
+    if (!round) throw new Error("Load a lunch round before placing an order.");
+
+    let token = session.participantToken;
+    let participantId = participant?._id;
+
+    // If not a participant in this round yet, join first
+    if (!token || !participantId) {
+      const orderName = (name || session.user?.name || "").trim();
+      if (!orderName) throw new Error("Please enter your name to submit your order.");
+      const result = await apiRequest<{ token: string; participant: Participant }>(
+        `/rounds/${encodeURIComponent(round.slug)}/join`,
+        {
+          method: "POST",
+          token: session.authToken,
+          body: jsonBody({ name: orderName })
+        }
+      );
+      token = result.token;
+      participantId = String(result.participant.participantId || result.participant._id);
+      updateSession({ roundSlug: round.slug, participantToken: token });
+      setRoundInUrl(round.slug);
+    }
+
+    // Save order quantities and name
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/order`, {
       method: "POST",
-      participantToken: session.participantToken,
-      body: jsonBody({ quantities })
+      token: session.authToken,
+      participantToken: token,
+      body: jsonBody({ quantities, name: name.trim() || undefined })
     });
+
     await refreshRound();
-    notify("Your order has been submitted.");
+    notify("Your lunch order has been submitted!");
   }
 
   async function lockRound(): Promise<void> {
@@ -495,18 +633,22 @@ function App() {
     if (!round) throw new Error("Load a lunch round before locking orders.");
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/lock`, {
       method: "POST",
+      token: session.authToken,
       participantToken: session.participantToken
     });
     await refreshRound();
     notify("Orders locked in the database.");
   }
 
-  async function settleRound(): Promise<void> {
+  async function settleRound(customFeeCents?: number): Promise<void> {
     if (!isOrganizer) throw new Error("Only the organizer can finalize this bill.");
     if (!round) throw new Error("Load a lunch round before finalizing the bill.");
+    const body = typeof customFeeCents === "number" ? { feeCents: customFeeCents } : {};
     await apiRequest(`/rounds/${encodeURIComponent(round.slug)}/settle`, {
       method: "POST",
-      participantToken: session.participantToken
+      token: session.authToken,
+      participantToken: session.participantToken,
+      body: jsonBody(body)
     });
     await refreshRound();
     notify("Final bill saved to the database.");
@@ -538,8 +680,36 @@ function App() {
     }
   }
 
+  async function updateUserProfileName(name: string): Promise<void> {
+    if (!session.authToken) throw new Error("Not signed in");
+    const result = await apiRequest<{ user: User }>("/users/me", {
+      method: "PATCH",
+      token: session.authToken,
+      body: jsonBody({ name })
+    });
+    updateSession({ user: result.user });
+    setUserProfile((prev) => prev ? { ...prev, name: result.user.name } : { name: result.user.name });
+    notify("Profile name updated.");
+  }
+
+  function clearLocalCache(): void {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem("lunchround-currency");
+      localStorage.removeItem("lunchround-duration");
+    } catch {}
+    setSession({ authToken: "", user: null, roundSlug: "", participantToken: "" });
+    setRound(null);
+    setParticipant(null);
+    setIsOrganizer(false);
+    setRoundInUrl("");
+    setView("setup");
+    notify("Session cache cleared.");
+  }
+
   async function logout(): Promise<void> {
     updateSession({ authToken: "", user: null });
+    setUserProfile(null);
     setShowLogin(true);
     notify("Signed out.");
   }
@@ -559,19 +729,22 @@ function App() {
       overridden: Boolean(selection.priceOverridden)
     };
   });
+
   const settlement = round?.settlementView || null;
   const totalCents = settlement?.totalCents ?? settlement?.orderTotalCents ??
     (settlement?.perParticipant || []).reduce((sum, line) => sum + safeNumber(line.totalCents), 0);
   const total = settlement
     ? totalCents / 100
     : finalSelectionRows.reduce((sum, item) => sum + item.total, 0);
+
   const dateText = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric" }).format(new Date(now));
 
   async function copyBreakdown(): Promise<void> {
+    const roundCurrency = round?.currency || currency;
     const lines = (settlement?.perParticipant || []).map((person) =>
-      `${person.participantName}: ${euro(safeNumber(person.totalCents) / 100, round?.currency || "EUR")}`
+      `${person.participantName}: ${euro(safeNumber(person.totalCents) / 100, roundCurrency)}`
     );
-    lines.push(`Total: ${euro(total, round?.currency || "EUR")}`);
+    lines.push(`Total: ${euro(total, roundCurrency)}`);
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       notify("Bill breakdown copied.");
@@ -594,6 +767,8 @@ function App() {
     }
   }
 
+  const activeView: View = sharedRoundLink ? "order" : view;
+
   if (showLogin && !session.authToken) {
     return (
       <LogIn
@@ -608,7 +783,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-canvas font-sans text-ink">
-      {!isSharedRoundView && <aside className="fixed inset-y-0 left-0 z-10 flex w-60 flex-col border-r border-stone-200 bg-white px-4 py-6 max-sm:inset-x-0 max-sm:inset-y-auto max-sm:bottom-0 max-sm:h-[60px] max-sm:w-full max-sm:flex-row max-sm:items-center max-sm:justify-center max-sm:border-r-0 max-sm:border-t max-sm:px-2 max-sm:py-1">
+      {!sharedRoundLink && <aside className="fixed inset-y-0 left-0 z-10 flex w-60 flex-col border-r border-stone-200 bg-white px-4 py-6 max-sm:inset-x-0 max-sm:inset-y-auto max-sm:bottom-0 max-sm:h-[60px] max-sm:w-full max-sm:flex-row max-sm:items-center max-sm:justify-center max-sm:border-r-0 max-sm:border-t max-sm:px-2 max-sm:py-1">
         <a className="flex items-center gap-2 px-2 font-display text-xl font-extrabold tracking-tight text-ink no-underline max-sm:hidden" href="#" aria-label="LunchRound home" onClick={(event) => { event.preventDefault(); setView("setup"); }}>
           <span className="grid h-8 w-8 place-items-center rounded-xl rounded-bl-sm bg-lunch text-base text-white">L</span>
           <span>Lunch Round<span className="text-lunch-orange">.</span></span>
@@ -616,7 +791,7 @@ function App() {
         <div className="mb-3 mt-12 px-2 text-[9px] font-bold tracking-widest text-stone-400 max-sm:hidden">YOUR WORKSPACE</div>
         <nav className="grid gap-1 max-sm:flex max-sm:w-full max-sm:max-w-sm max-sm:justify-around" aria-label="Main navigation">
           {navItems.map((item) => (
-            <button key={item.id} className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-xs transition hover:bg-stone-100 max-sm:min-h-11 max-sm:flex-col max-sm:gap-0 max-sm:px-1 max-sm:text-[8px] ${view === item.id ? "bg-lunch-soft font-bold text-lunch-dark" : "text-stone-500 hover:text-ink"}`} type="button" onClick={() => setView(item.id)}>
+            <button key={item.id} className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-xs transition hover:bg-stone-100 max-sm:min-h-11 max-sm:flex-col max-sm:gap-0 max-sm:px-1 max-sm:text-[8px] ${activeView === item.id ? "bg-lunch-soft font-bold text-lunch-dark" : "text-stone-500 hover:text-ink"}`} type="button" onClick={() => setView(item.id)}>
               <span className="grid w-5 place-items-center text-lg max-sm:text-base" aria-hidden="true">{item.icon}</span>{item.label}
             </button>
           ))}
@@ -634,15 +809,15 @@ function App() {
         </div>
       </aside>}
 
-      <main className={isSharedRoundView ? "min-h-screen px-4 pb-8 sm:px-8" : "ml-60 min-h-screen px-8 pb-14 max-sm:ml-0 max-sm:px-4 max-sm:pb-20"}>
-        {!isSharedRoundView && <header className="flex h-[72px] items-center justify-between border-b border-stone-200">
-          <div className="flex items-center gap-3 text-[10px] text-stone-400"><span>Workspace</span><span>/</span><strong className="font-semibold text-stone-600">{pageNames[view]}</strong></div>
+      <main className={`${sharedRoundLink ? "" : "ml-60"} min-h-screen px-8 pb-14 max-sm:ml-0 max-sm:px-4 max-sm:pb-20`}>
+        {!sharedRoundLink && <header className="flex h-[72px] items-center justify-between border-b border-stone-200">
+          <div className="flex items-center gap-3 text-[10px] text-stone-400"><span>Workspace</span><span>/</span><strong className="font-semibold text-stone-600">{pageNames[activeView]}</strong></div>
           <div className="flex items-center gap-3 text-[10px] text-stone-500"><span>{dateText}</span><span className="h-5 w-px bg-stone-200" /><span className="rounded-full border border-stone-200 px-2 py-1">{round ? "Connected to database" : "Backend connected"}</span></div>
         </header>}
 
-        {roundError && <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-800" role="alert">{roundError}<button className="ml-3 bg-transparent font-bold" type="button" onClick={() => setRoundError("")} aria-label="Dismiss error">×</button></div>}
+        {roundError && <div className="mt-5 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-800" role="alert"><span>{roundError}</span><button className="ml-3 bg-transparent font-bold text-red-700" type="button" onClick={() => setRoundError("")} aria-label="Dismiss error">×</button></div>}
 
-        {view === "setup" && (
+        {activeView === "setup" && (
           <OrganizeLunch
             round={round}
             participant={participant}
@@ -659,18 +834,24 @@ function App() {
             onStoreSearch={setStoreSearch}
             selectedStoreIds={selectedStoreIds}
             onToggleStore={(id) => setSelectedStoreIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])}
+            onSelectMultipleStores={setSelectedStoreIds}
             user={session.user}
             onSignIn={() => { setRoundError(""); setShowLogin(true); }}
             onCreateRound={(details) => runAction(() => createRound(details))}
+            onUpdateRound={(details) => runAction(() => updateRoundSettings(details))}
+            onDeleteRound={() => runAction(() => deleteRound())}
             onCopyLink={() => runAction(copyRoundLink)}
             onLockOrders={() => runAction(lockRound)}
+            onUnlockOrders={() => runAction(unlockRound)}
             onNavigateOrder={() => setView("order")}
+            onNavigateBill={() => setView("ledger")}
             onNewRound={() => runAction(startNewRound)}
+            onRefreshRound={() => runAction(refreshRound)}
             loading={isBusy}
           />
         )}
 
-        {(isSharedRoundView || view === "order") && (
+        {activeView === "order" && (
           <OrderLunch
             round={round}
             items={visibleItems}
@@ -678,21 +859,23 @@ function App() {
             currentOrder={currentOrder}
             participant={participant}
             isOrganizer={isOrganizer}
-            standalone={isSharedRoundView}
             locked={locked}
             hasDeadline={hasDeadline}
+            countdown={countdown}
             timeLabel={timeLabel}
             hours={hours}
             minutes={minutes}
             loading={isBusy}
-            onJoin={(name) => runAction(() => joinRound(name))}
-            onSubmitOrder={(quantities) => runAction(() => submitOrder(quantities))}
+            user={session.user}
+            onSubmitOrder={(name, quantities) => runAction(() => submitOrder(name, quantities))}
             onNavigateBill={() => setView("ledger")}
+            onNavigateOrganize={() => setView("setup")}
             onNewRound={() => runAction(startNewRound)}
+            onRefresh={() => runAction(refreshRound)}
           />
         )}
 
-        {view === "ledger" && (
+        {activeView === "ledger" && (
           <FinalBill
             round={round}
             selections={finalSelectionRows}
@@ -702,22 +885,42 @@ function App() {
             isOrganizer={isOrganizer}
             loading={isBusy}
             onLock={() => runAction(lockRound)}
-            onSettle={() => runAction(settleRound)}
+            onReopen={() => runAction(unlockRound)}
+            onSettle={(customFeeCents) => runAction(() => settleRound(customFeeCents))}
             onCopyBreakdown={() => runAction(copyBreakdown)}
             onBackToOrders={() => setView("order")}
           />
         )}
 
-        {view === "history" && (
+        {activeView === "history" && (
           <History
             rounds={historyRounds}
             loading={historyLoading}
             error={historyError}
             signedIn={Boolean(session.authToken)}
+            currency={currency}
             onOpenRound={(slug) => runAction(() => loadHistoryRound(slug))}
+            onDeleteRound={(slug) => runAction(() => deleteRound(slug))}
+            onSignIn={() => { setRoundError(""); setShowLogin(true); }}
+            onNavigateOrganize={() => setView("setup")}
           />
         )}
-        {view === "settings" && <Settings theme={theme} onThemeChange={setTheme} />}
+
+        {activeView === "settings" && (
+          <Settings
+            user={userProfile}
+            theme={theme}
+            onThemeChange={setTheme}
+            currency={currency}
+            onCurrencyChange={setCurrency}
+            defaultDuration={defaultDuration}
+            onDefaultDurationChange={setDefaultDuration}
+            onUpdateUserName={(name) => runAction(() => updateUserProfileName(name))}
+            onSignOut={logout}
+            onSignIn={() => { setRoundError(""); setShowLogin(true); }}
+            onClearCache={clearLocalCache}
+          />
+        )}
       </main>
       <div className={`pointer-events-none fixed bottom-6 right-6 z-20 max-w-[calc(100vw-2rem)] rounded-lg bg-stone-800 px-4 py-3 text-[10px] text-white shadow-xl transition-all max-sm:bottom-[72px] max-sm:right-4 ${toast ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"}`} role="status" aria-live="polite">{toast}</div>
     </div>
