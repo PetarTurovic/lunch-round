@@ -6,9 +6,8 @@ Two domains live in this database:
 
 - **Catalogue** — stores and their menus, harvested from delivery platforms.
   See [docs/database-design.md](docs/database-design.md).
-- **Orders** — rounds, participants, orders, selections and the settlement
-  split. This is the part the product is for. See
-  [docs/order-domain.md](docs/order-domain.md).
+- **Rounds** — the share link, who joined, what they ordered and the split bill.
+  This is the part the product is for. See [docs/order-domain.md](docs/order-domain.md).
 
 ## Structure
 
@@ -16,137 +15,151 @@ Two domains live in this database:
 backend/
 ├── docs/
 │   ├── database-design.md   # catalogue schema, v1 problems, index plan
-│   └── order-domain.md      # rounds/orders/settlement, the cents rule
-├── scripts/
-│   ├── verify-settlement.ts     # settlement maths assertions
-│   └── smoke-order-domain.ts    # end-to-end run through the models
+│   └── order-domain.md      # the round aggregate, the cents rule, allocation
+├── tests/
+│   └── settlement.test.ts   # money rules, including the reconciliation invariant
 └── src/
-    ├── server.ts
-    ├── app.ts
-    ├── config/
-    ├── shared/
-    │   ├── db/connection.ts
-    │   ├── errors.ts
-    │   ├── middleware.ts
-    │   └── health.routes.ts
+    ├── server.ts            # bootstrap, Mongo connect, graceful shutdown
+    ├── app.ts               # middleware, probes, routers, SPA static fallback
+    ├── config.ts            # env; fails fast if JWT_SECRET is missing in production
+    ├── errors.ts            # AppError hierarchy + error middleware
+    ├── auth.middleware.ts   # JWT auth, round resolution, participant session
+    ├── rate-limit.ts        # dependency-free fixed-window limiter
     └── features/
-        ├── stores/           # catalogue, menu embedded in the document
-        ├── platforms/        # per-platform rating scale and currency
-
-        ├── rounds/           # the share link
-        ├── participants/     # who is in a round
-        ├── orders/           # one restaurant's order + settlement maths
-        ├── selections/       # what a person ordered
-        ├── order-events/     # audit trail for order and price edits
-        └── users/            # optional accounts
+        ├── stores/          # catalogue: model, controller, routes
+        ├── rounds/          # model, service (atomic writes), controller,
+        │                    # routes, settlement (pure maths)
+        └── users/           # optional accounts
 ```
 
-Each feature folder follows `*.routes.ts` (router), `*.controller.ts`
-(handlers), `*.service.ts` (data access), `*.model.ts` (schema and indexes)
-and `*.types.ts` where the shapes are worth naming.
+Each feature folder is `*.model.ts` (schema and indexes), `*.controller.ts`
+(handlers), `*.routes.ts` (router), and — where there is real data access —
+`*.service.ts`. The round feature splits its money maths into `settlement.ts`,
+a pure module with no database access, so it can be tested directly.
 
 ## Express 5 notes
 
 - Handlers are plain `async` functions. Express 5 forwards rejected promises to
   the error middleware, so controllers `throw new NotFoundError(...)` directly.
-- The error handler in [src/shared/middleware.ts](src/shared/middleware.ts)
-  maps `AppError` to its status, Mongoose `ValidationError` to 400, everything
-  else to 500.
+- The error handler in [src/errors.ts](src/errors.ts) maps `AppError` to its
+  status, Zod and Mongoose `ValidationError` to 400, a Mongo `$jsonSchema`
+  rejection (code 121) to 400, and everything else to 500.
 
 ## API
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/health` | Liveness probe |
-| GET | `/api/stores` | List stores |
+| GET | `/health/live` | Liveness probe — process only |
+| GET | `/health` | Readiness probe — 503 while Mongo is unreachable |
+| POST | `/api/auth/register` | Create an account |
+| POST | `/api/auth/login` | Sign in, returns a bearer token |
+| GET | `/api/auth/me` | Current user (auth) |
+| PATCH | `/api/auth/me` | Update name/location (auth) |
+| POST | `/api/auth/claim` | Link a participant token to an account (auth) |
+| GET | `/api/stores` | List/filter stores |
 | GET | `/api/stores/:idOrSlug` | Single store by `_id` or `slug` |
-| GET | `/api/stores/:idOrSlug/menu` | Store with its embedded menu |
-| GET | `/api/stores/:idOrSlug/menu/summary` | Section headings + a few sample items (`?items=`, max 10) |
+| GET | `/api/stores/:idOrSlug/menu` | Store with its full embedded menu |
+| GET | `/api/stores/:idOrSlug/menu/summary` | Section headings + first N items (`?items=`, max 10) |
+| POST | `/api/stores/:idOrSlug/favorite` | Toggle a favourite (auth) |
+| GET | `/api/rounds` | Rounds I organize or joined (auth) |
+| POST | `/api/rounds` | Create a round (auth) |
+| GET | `/api/rounds/:idOrSlug` | A round, with its live bill |
+| PATCH | `/api/rounds/:idOrSlug` | Update a round (organizer) |
+| DELETE | `/api/rounds/:idOrSlug` | Delete a round (organizer) |
+| POST | `/api/rounds/:idOrSlug/join` | Join, returns the participant token |
+| GET | `/api/rounds/:idOrSlug/me` | My participant row and organizer flag |
+| PUT | `/api/rounds/:idOrSlug/items` | Replace the item list (organizer) |
+| POST | `/api/rounds/:idOrSlug/order` | Save my basket (participant) |
+| POST | `/api/rounds/:idOrSlug/lock` | Lock the round (organizer) |
+| POST | `/api/rounds/:idOrSlug/settle` | Settle and freeze the bill (organizer) |
 
-`GET /api/stores` filters: `platform`, `city`, `country`, `cuisine`, `category`,
-`search`, `status`, `minRating`, `lat` + `lon` + `radius` (km), plus `page`,
-`limit` (capped at 100), `sortBy` (`name`, `rating`, `itemCount`, `createdAt`,
-`updatedAt`) and `sortOrder`.
+`GET /api/stores` filters: `platform`, `city`, `country`, `cuisine`,
+`category`/`kind`, `search`, `status`, `minRating`, `lat` + `lon` + `radius`
+(km), plus `page`, `limit` (capped at 100), `sortBy` (`name`, `rating`,
+`itemCount`, `createdAt`, `updatedAt`) and `sortOrder`. Responses carry
+`pagination.{page,limit,total,totalPages,hasNextPage}`.
 
 Notes:
 
-- `city` takes the **normalised key** (`alicante`), not a spelling. 188
-  raw spellings in the source collapsed to 151 keys.
+- `city` takes the **normalised key** (`alicante`), not a spelling. 188 raw
+  spellings in the source collapsed to 151 keys.
 - `minRating` works **across platforms** — ratings are normalised onto 0-5, so
-  glovo's `96%` and Uber Eats' `4.3` are now comparable. They were not in v1.
-- `search` uses a real text index, which v1 documented but never had.
-- A geo search returns a `distanceMeters` field and skips the sort. `$near`
-  cannot be combined with another sort, and `countDocuments` rejects it
-  entirely, so that path runs through `$geoNear` aggregation instead of the
-  paginate plugin.
-- List responses project out `menu`. A full menu is up to ~400 KB; a page of
-  100 stores is ~63 KB.
-- `/menu/summary` is what shortlist browsing should call. It returns every
-  section with its true `itemCount` plus the first N items, sliced **in the
-  database** — ~78% smaller than the full menu for McDonald's, and it preserves
-  the order the organizer arranged the shortlist in.
+  glovo's `96%` and Uber Eats' `4.3` are comparable.
+- `search` uses a real text index.
+- A geo query returns a `distanceMeters` field. Without `search` it is ordered
+  by distance (`$near`, which cannot take another sort); with `search` it
+  filters by `$geoWithin` and sorts by the requested key, because `$text`
+  cannot be combined with `$near`.
+- List responses project out `menu`. A full menu is up to ~400 KB.
+- `/menu/summary` is what shortlist browsing should call: every section with
+  its true `itemCount` plus the first N items, sliced **in the database**.
 
-The order domain has no HTTP surface yet — the schemas, validators and
-settlement logic are in place and tested, the routes are not written.
+## The round aggregate
+
+A round is **one document**. Its shortlist, its item list, its roster and each
+person's basket all live inside it, which keeps a lunch atomic and cheap to
+read: opening a share link is a single document fetch.
+
+Money is stored as an **integer number of cents** everywhere (`priceCents`,
+`feeCents`, `totalCents`). No floats — see
+[docs/order-domain.md](docs/order-domain.md) §4 for why.
+
+The bill is computed by `calculateRoundBill` in
+[src/features/rounds/settlement.ts](src/features/rounds/settlement.ts). It
+allocates the fee across participants in proportion to what they ordered, using
+the **largest-remainder method**, so the per-person amounts always add up to the
+total exactly. `totalCents` is defined as that sum, so the two can never
+disagree. A round whose shortlist mixes currencies is rejected at creation: one
+bill cannot add pesos to euros.
+
+## Writes are atomic
+
+Mutations go through [src/features/rounds/rounds.service.ts](src/features/rounds/rounds.service.ts)
+and use targeted `$push`/`$set` updates with a positional filter, never a
+whole-document `save()`. A read-modify-write would let a participant joining
+from the shared link clobber the organizer's concurrent edit, or vice versa —
+last writer wins and one change silently disappears.
 
 ## Participant access tokens
 
 A name alone proves nothing — anyone with a share link could claim to be Sam and
 edit his basket. Joining a round issues a random 24-byte token, returned once,
-stored only as a SHA-256 digest and looked up by digest. Tokens are compared in
-constant time, are **scoped to one round** so a leaked link cannot be replayed
-against another, and `participants.tokenHash` is unique.
+stored only as a SHA-256 digest and looked up by digest. The digest is unique,
+so two participant rows cannot share one. Tokens are scoped to one round and
+sent in the **`X-Participant-Token` header** — never a query string, which lands
+in access logs and browser history.
 
-The raw token is never persisted. It goes into the participant's own URL, which
-is how a phone browser regains its basket after the tab closes.
+A participant's name must be unique within a round; two "Alex" rows would make
+"what does Alex owe" unanswerable.
 
-## Order audit trail
+## Hardening and operations
 
-`order_events` records every mutation to an order, with a before/after and a
-signed `deltaCents`. When the organizer edits a price or adds a tip, what
-someone owes changes — without a record, "you owe me €12.40" is unfalsifiable,
-and the organizer is the one making the edits. Restoring a price is recorded as
-`price_restored`, not a second override, so the timeline reads as a story rather
-than an end state.
-
-`getRoundMoneyTimelineService` turns that into a running total, which is what
-answers "why does the total say X?".
-
-## Money
-
-Every amount in `rounds`, `orders`, `selections` and `order_events` is an
-**integer number of cents** (`subtotalCents`, `unitPriceCents`, …). No floats,
-and the `$jsonSchema` validators use `bsonType: 'int'` so a fractional cent
-cannot be written even by code that skips the types.
-
-The reason is in [docs/order-domain.md](docs/order-domain.md) §4 — in short,
-shares of a split bill must add up to the total exactly.
+- `JWT_SECRET` is required in production — the process refuses to boot without
+  it rather than falling back to a source-visible default.
+- Sign-in, registration and joining a round are rate limited (`/health` and
+  normal reads are not).
+- `/health` reports readiness and returns 503 while Mongo is down; `/health/live`
+  is the process-only liveness probe.
+- `SIGTERM`/`SIGINT` stop new connections, drain in-flight requests, then close
+  Mongo.
 
 ## Commands
 
-All of these run from `backend/`. From the repo root, add
-`--prefix backend` (as the root README does for its own scripts).
+All of these run from `backend/`. From the repo root, add `--prefix backend`.
 
 ```bash
 npm install
 npm run dev              # tsx watch
 npm run build            # tsc
+npm run start            # node dist/server.js
 npm run type-check       # tsc --noEmit
+npm run test             # node:test via tsx
+npm run verify:settlement # the money rules, including reconciliation
 npm run format           # prettier
 ```
 
-Checks:
-
-```bash
-npm run verify:settlement         # settlement maths assertions
-npm run smoke:orders              # end-to-end through the models
-```
-
-Both are read-mostly: `smoke:orders` writes a throwaway round and cleans up
-after itself. The one-time v1 -> v2 migration script has been removed, along with
-its staging machinery and the `migrations` ledger; `docs/database-design.md` is
-the record of what it did.
-
 ## Environment
 
-See [.env.example](.env.example). `MONGODB_URI` is the database.
+See [.env.example](.env.example). `MONGODB_URI` is the database; `JWT_SECRET` is
+required in production; `CORS_ORIGIN` is a comma-separated allow-list (omit to
+allow all).

@@ -151,6 +151,15 @@ export const claim = async (req: Request, res: Response) => {
     throw new ConflictError("This participant is already claimed by another user");
   }
 
+  // One account may hold only one seat in a round, or the history view double
+  // counts them and the settlement lists the same person twice.
+  const alreadySeated = round.orders.some(
+    (o: RoundOrder) => o.userId?.equals(uId) && !o.participantId.equals(order.participantId),
+  );
+  if (alreadySeated) {
+    throw new ConflictError("You have already joined this round as another participant");
+  }
+
   order.userId = uId;
   if (round.organizer.participantId.equals(order.participantId)) {
     round.organizer.userId = uId;

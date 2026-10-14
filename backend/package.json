@@ -10,6 +10,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "type-check": "tsc --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
+    "verify:settlement": "tsx --test tests/settlement.test.ts",
     "format": "prettier --write \"src/**/*.ts\""
   },
   "dependencies": {

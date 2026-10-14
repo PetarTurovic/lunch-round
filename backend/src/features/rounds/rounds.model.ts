@@ -154,7 +154,10 @@ export const RoundSchema = new Schema<RoundDocument>(
 
 RoundSchema.index({ "organizer.userId": 1, createdAt: -1 });
 RoundSchema.index({ "orders.userId": 1, createdAt: -1 });
-RoundSchema.index({ "orders.tokenHash": 1 });
+// A participant token identifies exactly one person on exactly one round, so a
+// duplicate digest is a bug, not a coincidence. Unique makes it unrepresentable.
+RoundSchema.index({ "orders.tokenHash": 1 }, { unique: true });
+RoundSchema.index({ status: 1, closesAt: 1 });
 
 export const Round = mongoose.models.Round ?? mongoose.model<RoundDocument>("Round", RoundSchema);
 export default Round;

@@ -12,6 +12,31 @@ migration ran. Nothing here is estimated.
 
 ---
 
+## 0. Where this document diverges from the code today
+
+The schema below is what the database holds. A few things described in it were
+planned but are **not** what the API serves, and this note is here so the
+migration record is not mistaken for the current contract:
+
+- **`platforms` was never read or written.** No service, controller or route
+  touches it. Platform metadata currently lives only on each store.
+- **Geo ordering is `$near`, not `$geoNear`.** `GET /api/stores` returns
+  `distanceMeters` and orders by distance with `$near`; the count comes from a
+  parallel `$geoWithin` query. With `?search=` present it filters by
+  `$geoWithin` and sorts by the requested key, because `$text` cannot be
+  combined with `$near`.
+- **There is no `paginate` plugin.** Listing builds `skip`/`limit` by hand and
+  returns `pagination.{page,limit,total,totalPages,hasNextPage}`.
+- **`?minPrice=` and `?isSoldOut=` are not implemented.** The served filters are
+  `platform`, `city`, `country`, `cuisine`, `category`/`kind`, `search`,
+  `status`, `minRating`, geo, pagination and sort. `category` maps to
+  `taxonomy.kind`.
+- **The menu summary exists.** `GET /api/stores/:idOrSlug/menu/summary?items=N`
+  returns every section with a true `itemCount` and its first N items, sliced in
+  the database with an aggregation `$slice`.
+
+---
+
 ## 1. What was wrong with v1
 
 ### 1.1 The schema and the data disagreed — data was being thrown away

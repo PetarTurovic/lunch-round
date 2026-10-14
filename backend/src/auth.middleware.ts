@@ -24,41 +24,49 @@ export const signUserToken = (user: { _id: Types.ObjectId; email: string; name: 
     expiresIn: config.jwtExpiresIn as jwt.SignOptions["expiresIn"],
   });
 
-export const requireAuth = async (req: Request, _res: Response, next: NextFunction) => {
+const bearerValue = (req: Request): string | null => {
   const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ")) throw new UnauthorizedError("Authentication token required");
+  return auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
+};
+
+/** Resolve a signed-in user from the Authorization header, or null. */
+const readUserFromToken = async (req: Request): Promise<AuthUserPayload | null> => {
+  const token = bearerValue(req);
+  if (!token) return null;
   try {
-    const payload = jwt.verify(auth.split(" ")[1], config.jwtSecret) as AuthUserPayload;
+    const payload = jwt.verify(token, config.jwtSecret) as AuthUserPayload;
     const user = await User.findById(payload.id).lean();
-    if (!user) throw new UnauthorizedError("User no longer exists");
-    req.user = { id: user._id.toString(), email: user.email, name: user.name };
+    if (!user) return null;
+    return { id: user._id.toString(), email: user.email, name: user.name };
+  } catch {
+    return null;
+  }
+};
+
+export const requireAuth = async (req: Request, _res: Response, next: NextFunction) => {
+  try {
+    if (!bearerValue(req)) throw new UnauthorizedError("Authentication token required");
+    const user = await readUserFromToken(req);
+    if (!user) throw new UnauthorizedError("Invalid or expired token");
+    req.user = user;
     next();
-  } catch (err: any) {
-    next(err instanceof UnauthorizedError ? err : new UnauthorizedError("Invalid or expired token"));
+  } catch (err) {
+    next(err);
   }
 };
 
 export const optionalAuth = async (req: Request, _res: Response, next: NextFunction) => {
-  const auth = req.headers.authorization;
-  if (auth?.startsWith("Bearer ")) {
-    try {
-      const payload = jwt.verify(auth.split(" ")[1], config.jwtSecret) as AuthUserPayload;
-      const user = await User.findById(payload.id).lean();
-      if (user) req.user = { id: user._id.toString(), email: user.email, name: user.name };
-    } catch {}
-  }
+  const user = await readUserFromToken(req);
+  if (user) req.user = user;
   next();
 };
 
 export const resolveRound = (options?: { requireOrganizer?: boolean; requireParticipant?: boolean }) => {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
-      if (!req.user && req.headers.authorization?.startsWith("Bearer ")) {
-        try {
-          const payload = jwt.verify(req.headers.authorization.split(" ")[1], config.jwtSecret) as AuthUserPayload;
-          const user = await User.findById(payload.id).lean();
-          if (user) req.user = { id: user._id.toString(), email: user.email, name: user.name };
-        } catch {}
+      if (!req.user) {
+        const user = await readUserFromToken(req);
+        if (user) req.user = user;
       }
 
       const id = String(req.params.idOrSlug || req.params.roundId || "");
@@ -66,7 +74,9 @@ export const resolveRound = (options?: { requireOrganizer?: boolean; requirePart
       if (!round) throw new NotFoundError("Round");
       req.round = round;
 
-      const token = String(req.headers["x-participant-token"] || req.query.participantToken || "");
+      // Header only: a token in the query string ends up in access logs,
+      // proxies and browser history, which defeats the point of hashing it.
+      const token = String(req.headers["x-participant-token"] || "");
       const participant = (token ? round.orders.find((p: RoundOrder) => p.tokenHash === hashToken(token)) : null)
         || (req.user ? round.orders.find((p: RoundOrder) => p.userId?.toString() === req.user!.id) : null);
 

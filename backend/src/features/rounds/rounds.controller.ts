@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { Types } from "mongoose";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { BadRequestError, NotFoundError } from "../../errors";
+import { BadRequestError, ConflictError } from "../../errors";
 import { Store } from "../stores/stores.model";
 import {
   Round,
@@ -11,36 +11,16 @@ import {
   type RoundDocument,
   type RoundItem,
   type RoundOrder,
-  type RoundBill,
   type RoundStoreSummary,
 } from "./rounds.model";
-
-export const calculateRoundBill = (round: RoundDocument): RoundBill => {
-  const priceMap = new Map((round.items || []).map((item) => [item.id, Number(item.priceCents || 0)]));
-
-  const peopleFood = (round.orders || []).map((order) => {
-    const quantities = order.quantities || {};
-    const foodCents = Object.entries(quantities).reduce(
-      (sum, [itemId, qty]) => sum + Number(qty || 0) * (priceMap.get(itemId) || 0),
-      0,
-    );
-    return { name: order.name, foodCents };
-  });
-
-  const totalFoodCents = peopleFood.reduce((sum, p) => sum + p.foodCents, 0);
-  const feeCents = Number(round.feeCents || 0);
-
-  const people = peopleFood.map((p) => {
-    const feeShare = totalFoodCents > 0 ? Math.round((feeCents * p.foodCents) / totalFoodCents) : 0;
-    return { name: p.name, amountCents: p.foodCents + feeShare };
-  });
-
-  return {
-    settledAt: new Date(),
-    totalCents: totalFoodCents + feeCents,
-    people,
-  };
-};
+import { calculateRoundBill } from "./settlement";
+import {
+  freezeSettlement,
+  pushParticipant,
+  saveParticipantOrder,
+  setRoundFields,
+  setRoundStatus,
+} from "./rounds.service";
 
 const itemSchema = z.object({
   id: z.string(),
@@ -51,6 +31,14 @@ const itemSchema = z.object({
   storeName: z.string().optional(),
   section: z.string().optional(),
   imageUrl: z.string().optional(),
+});
+
+const locationSchema = z.object({
+  lat: z.number(),
+  lon: z.number(),
+  city: z.string().optional(),
+  cityLabel: z.string().optional(),
+  radiusKm: z.number().min(0.1).max(100).optional(),
 });
 
 const parseRating = (r: any): number | null => {
@@ -100,6 +88,37 @@ const extractItemsFromStores = (stores: any[]): RoundItem[] => {
   );
 };
 
+/**
+ * A round sums one bill across every store in its shortlist, so a shortlist
+ * mixing currencies would add pesos to euros. Reject it at the edge rather than
+ * returning a total that means nothing.
+ */
+const assertSingleCurrency = (shortlist: RoundStoreSummary[], requested?: string): string => {
+  const currencies = [...new Set(shortlist.map((s) => (s.currency || "EUR").toUpperCase()))];
+  if (currencies.length > 1) {
+    throw new BadRequestError(`All restaurants in a round must share one currency (got ${currencies.join(", ")})`);
+  }
+  const currency = currencies[0] ?? "EUR";
+  if (requested && requested.toUpperCase() !== currency) {
+    throw new BadRequestError(`Round currency ${requested.toUpperCase()} does not match the restaurants' ${currency}`);
+  }
+  return currency;
+};
+
+/** Older rounds stored only items; derive a shortlist for display. */
+const backfillShortlist = (round: RoundDocument) => {
+  if (!round.shortlist?.length && round.items?.length) {
+    const storesById = new Map<string, any>();
+    for (const item of round.items) {
+      if (item.storeId && item.storeName) {
+        storesById.set(item.storeId, { _id: item.storeId, name: item.storeName });
+      }
+    }
+    round.shortlist = Array.from(storesById.values());
+  }
+  return round;
+};
+
 export const getRounds = async (req: Request, res: Response) => {
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
   const userId = new Types.ObjectId(req.user!.id);
@@ -110,19 +129,7 @@ export const getRounds = async (req: Request, res: Response) => {
     .limit(limit)
     .lean();
 
-  const formatted = rounds.map((round) => {
-    if (!round.shortlist?.length && round.items?.length) {
-      const storesById = new Map();
-      for (const item of round.items) {
-        if (item.storeId && item.storeName) {
-          storesById.set(item.storeId, { _id: item.storeId, name: item.storeName });
-        }
-      }
-      round.shortlist = Array.from(storesById.values());
-    }
-    return round;
-  });
-
+  const formatted = rounds.map((round) => backfillShortlist(round as RoundDocument));
   res.json({ rounds: formatted });
 };
 
@@ -131,13 +138,7 @@ export const createRound = async (req: Request, res: Response) => {
     title: z.string().min(1).max(120),
     venue: z.string().max(120).optional(),
     currency: z.string().max(10).optional(),
-    location: z.object({
-      lat: z.number(),
-      lon: z.number(),
-      city: z.string().optional(),
-      cityLabel: z.string().optional(),
-      radiusKm: z.number().min(0.1).max(100).optional(),
-    }).nullable().optional(),
+    location: locationSchema.nullable().optional(),
     organizerName: z.string().min(1).max(100).optional(),
     closesAt: z.coerce.date().optional(),
     feeCents: z.number().int().min(0).optional(),
@@ -169,9 +170,9 @@ export const createRound = async (req: Request, res: Response) => {
     throw new BadRequestError("At least one restaurant must be selected for the round");
   }
 
+  const currency = assertSingleCurrency(shortlist, body.currency);
   const venue = body.venue?.trim()
     || (shortlist.length === 1 ? shortlist[0].name : shortlist.length > 1 ? "Multiple restaurants" : "Lunch Venue");
-  const currency = (body.currency || shortlist[0]?.currency || "EUR").toUpperCase();
 
   const organizerOrder: RoundOrder = {
     participantId: organizerParticipantId,
@@ -210,17 +211,9 @@ export const createRound = async (req: Request, res: Response) => {
 };
 
 export const getRound = (req: Request, res: Response) => {
-  const roundObj = req.round!.toObject();
-  const bill = roundObj.bill || calculateRoundBill(roundObj as any);
-  if (!roundObj.shortlist?.length && roundObj.items?.length) {
-    const storesById = new Map();
-    for (const item of roundObj.items) {
-      if (item.storeId && item.storeName) {
-        storesById.set(item.storeId, { _id: item.storeId, name: item.storeName });
-      }
-    }
-    roundObj.shortlist = Array.from(storesById.values());
-  }
+  const roundObj = req.round!.toObject() as RoundDocument;
+  backfillShortlist(roundObj);
+  const bill = roundObj.bill || calculateRoundBill(roundObj);
   res.json({ round: { ...roundObj, bill } });
 };
 
@@ -232,13 +225,7 @@ export const updateRound = async (req: Request, res: Response) => {
     title: z.string().min(1).max(120).optional(),
     venue: z.string().max(120).optional(),
     currency: z.string().max(10).optional(),
-    location: z.object({
-      lat: z.number(),
-      lon: z.number(),
-      city: z.string().optional(),
-      cityLabel: z.string().optional(),
-      radiusKm: z.number().min(0.1).max(100).optional(),
-    }).nullable().optional(),
+    location: locationSchema.nullable().optional(),
     feeCents: z.number().int().min(0).optional(),
     closesAt: z.coerce.date().nullable().optional(),
     status: z.enum(["open", "locked", "ordered"]).optional(),
@@ -247,37 +234,41 @@ export const updateRound = async (req: Request, res: Response) => {
     items: z.array(itemSchema).optional(),
   }).parse(req.body);
 
-  if (body.title !== undefined) round.title = body.title.trim();
-  if (body.venue !== undefined) round.venue = body.venue.trim();
-  if (body.currency !== undefined) round.currency = body.currency;
+  const fields: Record<string, unknown> = {};
+  if (body.title !== undefined) fields.title = body.title.trim();
+  if (body.venue !== undefined) fields.venue = body.venue.trim();
   if (body.location !== undefined) {
-    round.location = body.location ? { ...body.location, radiusKm: body.location.radiusKm || 10 } : null;
+    fields.location = body.location ? { ...body.location, radiusKm: body.location.radiusKm || 10 } : null;
   }
-  if (body.feeCents !== undefined) round.feeCents = body.feeCents;
-  if (body.closesAt !== undefined) round.closesAt = body.closesAt;
-  if (body.status !== undefined) round.status = body.status;
+  if (body.feeCents !== undefined) fields.feeCents = body.feeCents;
+  if (body.closesAt !== undefined) fields.closesAt = body.closesAt;
+  if (body.status !== undefined) fields.status = body.status;
 
-  if (body.items !== undefined) {
-    round.items = body.items;
-  }
+  if (body.items !== undefined) fields.items = body.items;
 
+  let nextShortlist: RoundStoreSummary[] | undefined;
   if (body.shortlist !== undefined) {
-    round.shortlist = body.shortlist;
+    nextShortlist = body.shortlist;
   } else if (body.storeIds !== undefined) {
-    round.shortlist = await populateShortlist(body.storeIds, round.items);
+    nextShortlist = await populateShortlist(body.storeIds, (body.items ?? round.items) as RoundItem[]);
     if (body.items === undefined) {
       const stores = await Store.find({ _id: { $in: body.storeIds } }).lean();
-      round.items = extractItemsFromStores(stores);
+      fields.items = extractItemsFromStores(stores);
     }
   } else if (body.items !== undefined) {
     const storeIds = [...new Set(body.items.map((i) => i.storeId).filter(Boolean))] as string[];
-    if (storeIds.length) {
-      round.shortlist = await populateShortlist(storeIds, body.items);
-    }
+    if (storeIds.length) nextShortlist = await populateShortlist(storeIds, body.items);
   }
 
-  await round.save();
-  res.json({ round });
+  if (nextShortlist) {
+    fields.currency = assertSingleCurrency(nextShortlist, body.currency);
+    fields.shortlist = nextShortlist;
+  } else if (body.currency !== undefined && round.shortlist?.length) {
+    fields.currency = assertSingleCurrency(round.shortlist, body.currency);
+  }
+
+  const updated = await setRoundFields(round._id, fields, { status: { $ne: "settled" } });
+  res.json({ round: updated });
 };
 
 export const deleteRound = async (req: Request, res: Response) => {
@@ -287,10 +278,18 @@ export const deleteRound = async (req: Request, res: Response) => {
 
 export const joinRound = async (req: Request, res: Response) => {
   const { name } = z.object({ name: z.string().min(1).max(100) }).parse(req.body);
+  const round = req.round!;
+  if (round.status !== "open") throw new BadRequestError(`Cannot join: round is ${round.status}`);
+
+  const participantName = name.trim();
+  const taken = round.orders.some((o) => o.name.trim().toLowerCase() === participantName.toLowerCase());
+  if (taken) {
+    throw new ConflictError("Someone in this round already uses that name");
+  }
+
   const token = generateToken();
   const participantId = new Types.ObjectId();
   const userId = req.user ? new Types.ObjectId(req.user.id) : null;
-  const participantName = name.trim();
 
   const participant: RoundOrder = {
     participantId,
@@ -302,14 +301,14 @@ export const joinRound = async (req: Request, res: Response) => {
     updatedAt: new Date(),
   };
 
-  req.round!.participants.push({
+  // $push is atomic, so two people joining at the same moment both land.
+  await pushParticipant(round._id, participant, {
     participantId,
     name: participantName,
     userId,
     isOrganizer: false,
   });
-  req.round!.orders.push(participant);
-  await req.round!.save();
+
   res.status(201).json({ participant, token });
 };
 
@@ -322,13 +321,13 @@ export const updateRoundItems = async (req: Request, res: Response) => {
   if (round.status === "settled") throw new BadRequestError("Cannot modify items in a settled round");
 
   const { items } = z.object({ items: z.array(itemSchema) }).parse(req.body);
-  round.items = items;
   const storeIds = [...new Set(items.map((i) => i.storeId).filter(Boolean))] as string[];
-  if (storeIds.length) {
-    round.shortlist = await populateShortlist(storeIds, items);
-  }
-  await round.save();
-  res.json({ items: round.items, shortlist: round.shortlist });
+  const fields: Record<string, unknown> = { items };
+  if (storeIds.length) fields.shortlist = await populateShortlist(storeIds, items);
+
+  const updated = await setRoundFields(round._id, fields, { status: { $ne: "settled" } });
+  if (!updated) throw new BadRequestError("Cannot modify items in a settled round");
+  res.json({ items: updated.items, shortlist: updated.shortlist });
 };
 
 export const saveOrder = async (req: Request, res: Response) => {
@@ -340,55 +339,65 @@ export const saveOrder = async (req: Request, res: Response) => {
     name: z.string().min(1).max(100).optional(),
   }).parse(req.body);
 
-  const order = round.orders.find((o) => o.participantId.equals(req.participant!.participantId));
-  if (!order) throw new NotFoundError("Participant order");
+  const participantId = req.participant!.participantId;
+  const updated = await saveParticipantOrder(
+    round._id,
+    participantId,
+    quantities,
+    name && name.trim() ? name.trim() : undefined,
+  );
+  if (!updated) throw new BadRequestError(`Cannot modify order: round is no longer open`);
 
-  order.quantities = quantities;
-  if (name && name.trim()) {
-    const trimmed = name.trim();
-    order.name = trimmed;
-    const p = round.participants.find((item) => item.participantId.equals(req.participant!.participantId));
-    if (p) p.name = trimmed;
-    round.markModified("participants");
-  }
-  order.updatedAt = new Date();
-  round.markModified("orders");
-  await round.save();
-
+  const order = updated.orders.find((o) => o.participantId.equals(participantId));
   res.json({ order });
 };
 
 export const lockRound = async (req: Request, res: Response) => {
-  const round = req.round!;
-  round.status = "locked";
-  await round.save();
-  res.json({ round });
+  const updated = await setRoundStatus(req.round!._id, "locked");
+  if (!updated) throw new BadRequestError("Cannot lock a settled round");
+  res.json({ round: updated });
 };
 
 export const settleRound = async (req: Request, res: Response) => {
   const round = req.round!;
   if (!round.orders.length) throw new BadRequestError("Cannot settle an empty round");
 
-  if (typeof req.body?.feeCents === "number") round.feeCents = req.body.feeCents;
-  if (Array.isArray(req.body?.items)) round.items = req.body.items;
+  const body = z.object({
+    feeCents: z.number().int().min(0).optional(),
+    items: z.array(itemSchema).optional(),
+  }).parse(req.body ?? {});
 
-  const bill = calculateRoundBill(round.toObject() as any);
-  round.bill = bill;
-  round.settlement = {
+  const fields: Record<string, unknown> = {};
+  if (body.feeCents !== undefined) fields.feeCents = body.feeCents;
+  if (body.items !== undefined) fields.items = body.items;
+
+  // Bill the round as it will be stored, so the frozen numbers match the document.
+  const billSource = {
+    items: (body.items ?? round.items) as RoundItem[],
+    orders: round.orders as RoundOrder[],
+    feeCents: body.feeCents ?? round.feeCents,
+  };
+  const bill = calculateRoundBill(billSource);
+
+  const settlement = {
     isLive: false,
     totalCents: bill.totalCents,
     orderTotalCents: bill.totalCents,
-    perParticipant: bill.people.map((p, idx) => ({
-      participantId: String(round.orders[idx]?.participantId || ""),
-      participantName: p.name,
-      totalCents: p.amountCents,
-      itemsCents: p.amountCents,
+    perParticipant: bill.people.map((person, idx) => ({
+      participantId: String(round.orders[idx]?.participantId ?? ""),
+      participantName: person.name,
+      totalCents: person.amountCents,
+      itemsCents: person.amountCents,
       adjustmentsCents: 0,
     })),
     frozenAt: bill.settledAt.toISOString(),
   };
-  round.status = "settled";
-  await round.save();
 
-  res.json({ round });
+  const updated = await freezeSettlement(round._id, {
+    ...fields,
+    bill,
+    settlement,
+    status: "settled",
+  });
+  res.json({ round: updated });
 };

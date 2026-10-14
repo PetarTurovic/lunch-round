@@ -10,6 +10,7 @@
     "start": "npm start --prefix backend",
     "build": "npm run build --prefix backend && npm run build --prefix frontend",
     "type-check": "npm run type-check --prefix backend && npm run type-check --prefix frontend",
+    "test": "npm test --prefix backend",
     "setup": "npm install --include=dev && npm run install:packages",
     "install:packages": "npm install --prefix backend --include=dev && npm install --prefix frontend --include=dev"
   },

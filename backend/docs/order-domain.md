@@ -1,8 +1,8 @@
-# LunchRound — Order & Settlement Domain
+# LunchRound — Round & Settlement Domain
 
 How a lunch actually happens in the app, and how the data models it.
 
-The catalogue side (stores, menus, harvests) is documented in
+The catalogue side (stores, menus) is documented in
 [database-design.md](./database-design.md). This covers the part the product is
 actually *for*.
 
@@ -15,285 +15,210 @@ Organizer picks a shortlist of restaurants
         ↓
 Creates a ROUND and shares its link
         ↓
-Friends open the link, type a name, pick a restaurant
-from the shortlist and choose items
+Friends open the link, type a name, choose items
+from the shortlist
         ↓
-Organizer locks it, orders, then edits prices and
-adds a tip because the restaurant charged differently
+Organizer locks it, then settles it — the bill
+is frozen
         ↓
-Everyone sees what they owe; organizer records what
-has been paid back
+Everyone sees what they owe, to the cent
 ```
 
 ---
 
-## 2. Collections
+## 2. The collection: one document per round
 
-| Collection | Holds |
+There is exactly **one** collection in this domain, `rounds`, and a round is a
+single document. It owns:
+
+| Field | Holds |
 | --- | --- |
-| `rounds` | The share link. Owns the shortlist and the lifecycle. |
-| `participants` | Who took part. Anonymous by default. |
-| `orders` | One restaurant's order inside a round. |
-| `selections` | What one person ordered from one restaurant. |
-| `users` | Optional accounts, for people who want their history. |
+| `slug` | The share token in the link (8 hex chars, unique). |
+| `organizer` | `{ participantId, name, userId }` — the organizer is an ordinary participant, not a special user. |
+| `shortlist[]` | The restaurants on offer, as `{ _id, slug, name, platform, currency, rating, itemCount }` snapshots. |
+| `items[]` | Every orderable item across the shortlist, `{ id, name, priceCents, storeId, storeName, section, imageUrl }`. Ids are `` `${storeId}:${itemId}` ``. |
+| `participants[]` | The roster: `{ participantId, name, userId, isOrganizer }`. |
+| `orders[]` | One row per person: `{ participantId, name, userId, tokenHash, quantities, joinedAt, updatedAt }`. |
+| `feeCents` | The shared charge (delivery/tip) to allocate across the people. |
+| `bill` | The frozen bill, written once at settlement. |
+| `status` | `open | locked | ordered | settled`. |
 
-### Why five and not fewer
+A participant appears in both `participants[]` and `orders[]`. `participants`
+is the roster (who is here); `orders` carries the basket and the token. Both
+are keyed by the same `participantId`.
 
-A round **can** contain several orders, because the organizer offers a
-shortlist and different people may pick different restaurants. Collapsing
-`rounds` and `orders` into one collection would mean either losing that
-distinction or stuffing a nested array of orders inside every round — the same
-mistake the catalogue just paid for.
+### Why one document and not five
 
-### Why `users` is separate from `participants`
+An earlier design (still visible in the git history and in some prose) split
+this across `rounds`, `participants`, `orders`, `selections` and `order_events`.
+The shipped version embeds them instead, because:
 
-Nobody in a work lunch is going to create an account to order a sandwich.
-A participant is a name and a round. `users` exists only for the person who
-*does* want to see their history, and a participant carries a nullable
-`userId`. Linking one to the other retroactively reveals their past rounds
-without ever asking for a login up front.
+- A lunch is small and bounded — a handful of people, dozens of items.
+- Opening a share link is the hot path and it becomes **one** document read.
+- The catalogue already showed what splitting a always-read-together unit
+  costs: 8,476 dangling references and a join per view.
 
-### The organizer is an ordinary participant
-
-`rounds.organizer` stores a `participantId`, not a special user. The organizer
-orders food too and owes the restaurant the same as everyone else, so "what
-does the group owe" and "what does the organizer owe" stay the same shape of
-question.
-
----
-
-## 3. Shapes
-
-### `rounds`
-
-```js
-{
-  _id: ObjectId,
-  slug: 'x7k2mq9',            // the share token, 6-32 chars [A-Za-z0-9_-]
-  title: 'Friday lunch',
-  notes: 'meet in the lobby at 1',
-  currency: 'EUR',
-  organizer: { participantId: ObjectId, name: 'Organizer', userId: null },
-  shortlist: ['glovo:9500', 'ubereats:cS0...'],   // at least one, enforced
-  status: 'open',             // open -> locked -> ordered -> settled
-  closesAt: ISODate(...),
-  settlement: null,           // frozen totals, written when settled
-}
-```
-
-### `participants`
-
-```js
-{
-  _id: ObjectId,
-  roundId: ObjectId,
-  userId: null,               // set later if this person signs up
-  name: 'Alex',
-  joinedAt: ISODate(...),
-}
-```
-
-### `orders`
-
-```js
-{
-  _id: ObjectId,
-  roundId: ObjectId,
-  storeId: 'glovo:9500',
-  storeSnapshot: { name: "McDonald's®", slug: 'mcdonalds-ali' },
-  status: 'open',
-  currency: 'EUR',
-
-  subtotalCents: 12150,
-  adjustmentsCents: 449,      // tip + delivery fee - discounts
-  totalCents: 12599,
-  paidCents: 4000,
-
-  adjustments: [
-    { label: 'Tip',      type: 'tip',      amountCents: 250, allocation: 'proportional' },
-    { label: 'Delivery', type: 'fee',      amountCents: 199, allocation: 'equal' },
-    { label: 'Coupon',   type: 'discount', amountCents: 100, allocation: 'proportional' },
-  ],
-  payments: [
-    { participantId: ObjectId, amountCents: 4000, method: 'bizum', receivedAt: ISODate(...) },
-  ],
-}
-```
-
-`adjustments[].allocation` is the interesting bit. A **tip** is normally
-`proportional` — it follows what each person ate. A **delivery fee** is normally
-`equal` — everyone ate from the same delivery. The organizer picks per charge.
-
-### `selections`
-
-```js
-{
-  _id: ObjectId,
-  orderId: ObjectId,
-  participantId: ObjectId,
-  roundId: ObjectId,          // denormalised: settlement needs it in one query
-
-  storeId: 'glovo:9500',
-  itemId: 'f8aa4313-...',     // into the store's embedded menu
-  itemSnapshot: { name: 'McPollo®', imageUrl: '...' },
-
-  quantity: 2,
-
-  menuUnitPriceCents: 545,    // what the menu said
-  unitPriceCents: 680,        // what is actually charged
-  priceOverridden: true,      // the organizer edited it
-
-  status: 'active',
-}
-```
-
-This is where "he can edit the price of the item" lives. `unitPriceCents` is
-the charge; `menuUnitPriceCents` is what the catalogue said; the flag says
-which. Keeping both means the UI can show "edited from €5.45" and the
-settlement never has to guess.
-
-`itemSnapshot` matters more than it looks: without it, the next harvest would
-silently rewrite what someone ordered last month and change what they owe.
+The honest cost: a round is capped by MongoDB's 16 MB document limit, and two
+people editing at once hit the **same** document. §6 is how that is handled, and
+it is the reason the write path is not a plain `save()`.
 
 ---
 
-## 4. The money rule
+## 3. Money is integer cents
 
-**Every amount in the order domain is an integer number of cents.** There is no
-float money anywhere in these five collections.
+Every amount is an **integer number of cents**: `items[].priceCents`,
+`feeCents`, `bill.totalCents`, `bill.people[].amountCents`.
 
 Floating point cannot represent `0.10` exactly. Split a €23.45 bill three ways
-and the naive result is `7.816666666666667` per person, which does not add up
-to the total. On a settlement screen that is not a rounding curiosity — it is
-the app telling three people they owe numbers that do not reconcile, which is
+and the naive result is `7.816666666666667` per person, which does not add up to
+the total. On a settlement screen that is not a rounding curiosity — it is the
+app telling three colleagues they owe numbers that do not reconcile, which is
 exactly the problem the organizer was trying to solve.
 
-The `$jsonSchema` validators reject fractional cents at the database:
-
-```js
-totalCents: { bsonType: 'int', minimum: 0 }
-```
-
-`bsonType: 'int'` is doing real work there. It means a bad write cannot get in
-even if it bypasses the TypeScript.
-
 Prices are converted once, at the edge, from the catalogue's decimal `price`
-(`5.45`) to cents (`545`). The catalogue keeps decimals because that is what
-the platforms publish; the order domain keeps integers because that is what
-gets added up.
+(`5.45`) to cents (`545`) when items are extracted from a store's menu. The
+catalogue keeps decimals because that is what the platforms publish; the round
+keeps integers because that is what gets added up.
+
+**A round has exactly one currency.** It is taken from its shortlist and a
+shortlist that mixes currencies is rejected at creation — one bill cannot add
+pesos to euros.
 
 ---
 
-## 5. The settlement algorithm
+## 4. The bill
 
-`src/features/orders/orders.settlement.ts`. It is a pure function over plain
-objects, with no database access, so it can be tested directly.
+`calculateRoundBill` in [../src/features/rounds/settlement.ts](../src/features/rounds/settlement.ts)
+is a pure function over plain objects: no Mongoose, no database, so it can be
+tested directly (see [../tests/settlement.test.ts](../tests/settlement.test.ts)).
 
-For one order:
+For a round:
 
-1. Each participant's `itemsCents` is the sum over their active selections of
-   `unitPriceCents × quantity`.
-2. Each adjustment is allocated across participants:
-   - `proportional` — weighted by each participant's `itemsCents`
-   - `equal` — weighted by 1
-3. `discount` subtracts; `tip` and `fee` add.
-4. **Leftover cents are distributed, never dropped.**
+1. Each person's `foodCents` is the sum over their quantities of
+   `priceCents × quantity`.
+2. `feeCents` is allocated across participants **proportionally to what they
+   ordered** — a delivery fee or tip follows the food.
+3. `totalCents` is the sum of what the people owe, plus the allocated fee.
 
-Step 4 is the part that matters. Flooring each share loses up to one cent per
-participant, and those cents have to go somewhere or the round does not
-reconcile. The allocation uses the largest-remainder method: floor
-everything, then hand the shortfall out one cent at a time to the largest
+### Leftover cents are distributed, never dropped
+
+Step 2 is the part that matters. `Math.round` on each share does not reconcile:
+a 100¢ fee split three ways rounds to 33¢ each — 99¢ — while the total says
+100¢. The allocation therefore uses the **largest-remainder method**: floor
+every exact share, then hand the shortfall out one cent at a time to the largest
 fractional parts, ties broken by position so the result is stable.
 
-Verified by `npx tsx scripts/verify-settlement.ts`, which covers the cases that
-break naive division — a 100c tip over weights 1:2:3 (shares of 17/33/50),
-a 199c fee split between two people, an equal fee where one participant
-ordered nothing, a proportional fee with a zero subtotal (the divide-by-zero
-case), and a discount driving the total below the subtotal.
+The same function covers the edge cases:
+
+- **A fee where nobody ordered** (every weight zero) is spread evenly rather
+  than dropped — the divide-by-zero case.
+- **A fee where only one person ordered** puts the whole fee on that person;
+  everyone else owes exactly 0.
+- **A round with no participants** allocates no fee at all.
+
+`totalCents` is *defined* as the sum of `people[].amountCents`, so the total and
+the line items cannot disagree. The test suite asserts that invariant, including
+across 500 randomised baskets.
 
 ---
 
-## 6. Indexes
+## 5. Status
 
-| Collection | Index | Serves |
-| --- | --- | --- |
-| `rounds` | `{ slug: 1 }` unique | opening the share link |
-| | `{ 'organizer.userId': 1, createdAt: -1 }` | "my rounds" |
-| | `{ status: 1, closesAt: 1 }` | what is still open |
-| `participants` | `{ roundId: 1, joinedAt: 1 }` | the round roster |
-| | `{ roundId: 1, userId: 1 }` unique **partial** | one participant per account per round |
-| | `{ userId: 1, joinedAt: -1 }` | "rounds I have joined" |
-| `orders` | `{ roundId: 1, createdAt: 1 }` | the round as a list |
-| `selections` | `{ orderId: 1, participantId: 1, status: 1 }` | **the settlement query** |
-| | `{ orderId: 1, participantId: 1, itemId: 1 }` unique | one line per item |
-| `users` | `{ email: 1 }` unique | sign-in |
+`status` moves `open → locked → settled` through the organizer's actions:
 
-### That partial index is not a detail
-
-`{ roundId, userId }` **cannot** be `sparse`. A sparse index only skips
-documents where the field is *missing*, but anonymous participants store
-`userId: null` explicitly — which is present, not missing. Under a sparse
-unique index, the second anonymous participant in a round collides on the
-unique key. This is not theoretical; it is exactly what happened the first
-time the smoke test ran.
-
-It has to be a partial index that only covers real user references:
-
-```js
-{ key: { roundId: 1, userId: 1 }, unique: true,
-  partialFilterExpression: { userId: { $type: 'objectId' } } }
-```
-
----
-
-## 7. Settling and freezing
-
-### `rounds.status` is derived, never authored
-
-A round's status is computed from its orders by `deriveRoundStatus` and written
-by `refreshRoundStatusService` — the only writer of the field. Nothing decides it
-directly. A stored status that could be set independently of the orders it
-summarises is representable, and once it drifts (`rounds: 'settled'` while an
-`order` is still `open`) the organizer has no reliable view of what anyone is
-doing.
-
-The rules, in order:
-
-| Condition | Result |
+| Action | Effect |
 | --- | --- |
-| no orders, or every order cancelled, deadline passed | `locked` |
-| no orders, or every order cancelled, deadline not passed | `open` |
-| any live order still `open` | `open` |
-| live orders are a mix of `locked`/`ordered`/`settled` | `locked` |
-| every live order `ordered`, not all fully paid | `ordered` |
-| every live order fully paid | `settled` |
+| `POST /rounds/:id/join` | Only while `open`. |
+| `POST /rounds/:id/order` | Only while `open`; the write itself is filtered on `open`, so a lock landing mid-request cannot be overwritten. |
+| `PUT /rounds/:id/items`, `PATCH /rounds/:id` | Rejected once `settled`. |
+| `POST /rounds/:id/lock` | Sets `locked`. |
+| `POST /rounds/:id/settle` | Computes the bill, writes `bill`, `settlement` and `status: settled`. |
 
-Cancelled orders are excluded before any of this: cancelling one order in an
-otherwise-settled round must not drag the round back.
-
-### Freezing
-
-When the organizer marks a round `settled`, the computed per-participant lines
-are written to `rounds.settlement`. After that the numbers are frozen, so a
-late edit to a selection cannot retroactively change what someone already paid.
-The settlement view then always has two sources: the live computation while
-the round is open, and the frozen snapshot afterwards.
+Settlement is a **freeze**: the computed per-person lines are written to the
+document so a later edit cannot retroactively change what someone already paid.
 
 ---
 
-## 8. Deliberate trade-offs
+## 6. Concurrent writes
 
-- **No foreign keys.** MongoDB has none. `selections.roundId` is denormalised
-  deliberately so the settlement view is one query instead of a join, and the
-  round id can never disagree with its order's because it is written from it.
-- **Denormalised totals on `orders`.** The organizer needs a running total
-  while editing, and every edit rewrites one document rather than summing every
-  selection per keystroke. `settleOrder` trusts its own arithmetic over the
-  stored subtotal for this reason.
-- **No `payments` collection.** Payments are small, always read with their
-  order, and never queried across orders. Embedding them avoids a collection
-  for what would be a four-field document.
-- **`order_events` covers the money, not everything else.** It records the
-  changes that alter what someone owes — price overrides, tips, adjustments,
-  payments. Cosmetic edits (a typo in a title, a reordered shortlist) are not
-  evented; `updatedAt` on the document is the record for those.
+A round is one mutable document, and the app's most common concurrent event is
+several friends joining from the same shared link at once. A read-modify-write
+(`round.save()`) would make that last-writer-wins: one participant silently
+disappears, or the organizer's edit is lost.
+
+So every mutation goes through
+[../src/features/rounds/rounds.service.ts](../src/features/rounds/rounds.service.ts)
+and is a targeted atomic update:
+
+- **Joining** is `$push` — two simultaneous joins both land.
+- **Saving a basket** is `$set` with `arrayFilters` on the one order row, and
+  the query is filtered on `status: 'open'`.
+- **Editing items / round fields** is `$set` of just the changed fields.
+- **Locking and settling** are `$set` of status/bill.
+
+The write for a participant's basket updates the `orders` row and the matching
+`participants` row in the same operation via two array filters, so the roster
+name and the basket name cannot drift apart.
+
+---
+
+## 7. Participants and tokens
+
+A name alone proves nothing — anyone with a share link could claim to be Sam and
+edit his basket. So joining issues a random 24-byte token, returned once, stored
+only as a SHA-256 digest. Properties that are actually enforced:
+
+- The digest is looked up by digest, never the raw token (which is never stored).
+- `orders.tokenHash` carries a **unique** index — a duplicate digest is a bug,
+  and an index makes it unrepresentable.
+- The token is sent in the `X-Participant-Token` **header**. It is never read
+  from the query string, where it would leak into access logs, proxies and
+  browser history.
+- A name must be unique within a round (case-insensitively). Two "Alex" rows
+  make "what does Alex owe" unanswerable, so `join` rejects the second.
+
+`POST /auth/claim` links a participant token to a signed-in account. One account
+may hold only one seat in a round.
+
+---
+
+## 8. Indexes
+
+| Index | Serves |
+| --- | --- |
+| `{ slug: 1 }` unique | opening the share link |
+| `{ 'organizer.userId': 1, createdAt: -1 }` | "my rounds" |
+| `{ 'orders.userId': 1, createdAt: -1 }` | "rounds I joined" |
+| `{ 'orders.tokenHash': 1 }` unique | participant session lookup |
+| `{ status: 1, closesAt: 1 }` | what is still open |
+
+> **One-time note for an existing database.** Declaring an index in the schema
+does not change an index that already exists under the same name: Mongoose sees
+`orders.tokenHash_1`, finds a name match, and skips it — so an earlier
+non-unique index keeps the field non-unique even after the schema says
+`unique: true`. Applying the change to an existing database needs the old index
+dropped once, after which startup recreates it correctly:
+>
+> ```js
+> await db.collection('rounds').dropIndex('orders.tokenHash_1')
+> ```
+>
+> Verified: with the stale index dropped, `orders.tokenHash_1` comes back
+> `unique: true`, and there were no duplicate digests to block it.
+
+---
+
+## 9. Deliberate trade-offs
+
+- **One currency per round.** A shortlist spanning two currencies is rejected
+  rather than converted; there is no FX rate to convert at.
+- **No per-item price override.** The organizer edits `items[].priceCents` for
+  the whole round, not one person's line, and there is no `menuUnitPriceCents`
+  trail recording that an edit happened. Adding that needs an audit record —
+  see the note in [database-design.md](./database-design.md) §2.5 about why the
+  old `change_events` was removed rather than kept as a plausible-looking
+  audit trail that recorded nothing.
+- **`feeCents` is a single proportional charge.** There is no typed adjustment
+  list (tip vs delivery fee vs coupon) and no `equal`-allocation option.
+- **The document is bounded.** Embedding caps a round at 16 MB and makes the
+  whole round one write target; §6 is what keeps that safe.
