@@ -879,11 +879,10 @@ function App() {
   return (
     <div className="min-h-screen bg-canvas font-sans text-ink">
       {!sharedRoundLink && <aside className="fixed inset-y-0 left-0 z-10 flex w-60 flex-col border-r border-stone-200 bg-white px-4 py-6 max-sm:inset-x-0 max-sm:inset-y-auto max-sm:bottom-0 max-sm:h-[60px] max-sm:w-full max-sm:flex-row max-sm:items-center max-sm:justify-center max-sm:border-r-0 max-sm:border-t max-sm:px-2 max-sm:py-1">
-        <a className="flex items-center gap-2 px-2 font-display text-xl font-extrabold tracking-tight text-ink no-underline max-sm:hidden" href="#" aria-label="LunchRound home" onClick={(event) => { event.preventDefault(); setView("setup"); }}>
-          <span className="grid h-8 w-8 place-items-center rounded-xl rounded-bl-sm bg-lunch text-base text-white">L</span>
-          <span>Lunch Round<span className="text-lunch-orange">.</span></span>
+        <a className="flex w-full items-center justify-center no-underline outline-none ring-0 focus:outline-none focus:ring-0 max-sm:hidden" href="#" aria-label="LunchRound home" onClick={(event) => { event.preventDefault(); setView("setup"); }}>
+          <img src="/lunch-round-logo.png" alt="LunchRound logo" className="h-28 w-44 object-contain" />
         </a>
-        <div className="mb-3 mt-12 px-2 text-[9px] font-bold tracking-widest text-stone-400 max-sm:hidden">YOUR WORKSPACE</div>
+        <div className="mb-3 mt-8 px-2 text-[9px] font-bold tracking-widest text-stone-400 max-sm:hidden">YOUR WORKSPACE</div>
         <nav className="grid gap-1 max-sm:flex max-sm:w-full max-sm:max-w-sm max-sm:justify-around" aria-label="Main navigation">
           {navItems.map((item) => (
             <button key={item.id} className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-xs transition hover:bg-stone-100 max-sm:min-h-11 max-sm:flex-col max-sm:gap-0 max-sm:px-1 max-sm:text-[8px] ${activeView === item.id ? "bg-lunch-soft font-bold text-lunch-dark" : "text-stone-500 hover:text-ink"}`} type="button" onClick={() => setView(item.id)}>
