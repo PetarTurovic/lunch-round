@@ -907,7 +907,7 @@ function App() {
       <main className={`${sharedRoundLink ? "" : "ml-60"} min-h-screen px-8 pb-14 max-sm:ml-0 max-sm:px-4 max-sm:pb-20`}>
         {!sharedRoundLink && <header className="flex h-[72px] items-center justify-between border-b border-stone-200">
           <div className="flex items-center gap-3 text-[10px] text-stone-400"><span>Workspace</span><span>/</span><strong className="font-semibold text-stone-600">{pageNames[activeView]}</strong></div>
-          <div className="flex items-center gap-3 text-[10px] text-stone-500"><span>{dateText}</span><span className="h-5 w-px bg-stone-200" /><span className="rounded-full border border-stone-200 px-2 py-1">{round ? "Connected to database" : "Backend connected"}</span></div>
+          <div className="flex items-center gap-3 text-[10px] text-stone-500"><span>{dateText}</span></div>
         </header>}
 
         {roundError && <div className="mt-5 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-800" role="alert"><span>{roundError}</span><button className="ml-3 bg-transparent font-bold text-red-700" type="button" onClick={() => setRoundError("")} aria-label="Dismiss error">×</button></div>}
